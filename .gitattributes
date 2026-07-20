@@ -1,0 +1,8 @@
+metropt+3+dataset/MetroPT3(AirCompressor).csv filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/EPS1.txt filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/PS1.txt filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/PS2.txt filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/PS3.txt filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/PS4.txt filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/PS5.txt filter=lfs diff=lfs merge=lfs -text
+condition+monitoring+of+hydraulic+systems/PS6.txt filter=lfs diff=lfs merge=lfs -text

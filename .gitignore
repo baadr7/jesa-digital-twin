@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Notebook outputs (figures are embedded as base64 inside .ipynb)
+notebooks/*.png
+
+# Raw datasets (too large for git — download separately)
+ai4i+2020+predictive+maintenance+dataset/
+condition+monitoring+of+hydraulic+systems/
+metropt+3+dataset/
+sim/data/*.npz
+
+# IDE
+.idea/
+.vscode/
+*.swp

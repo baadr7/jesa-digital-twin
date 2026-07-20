@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JESA - Asset simulators live view</title>
+<style>
+  :root {
+    --page:        #f9f9f7;
+    --surface-1:   #fcfcfb;
+    --text-primary:#0b0b0b;
+    --text-secondary:#52514e;
+    --text-muted:  #898781;
+    --grid:        #e1e0d9;
+    --baseline:    #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series-1: #2a78d6; --series-2: #1baf7a; --series-3: #eda100;
+    --series-4: #008300; --series-5: #4a3aa7; --series-6: #e34948;
+    --status-good: #0ca30c; --status-warning: #fab219;
+    --status-serious: #ec835a; --status-critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:        #0d0d0d;
+      --surface-1:   #1a1a19;
+      --text-primary:#ffffff;
+      --text-secondary:#c3c2b7;
+      --text-muted:  #898781;
+      --grid:        #2c2c2a;
+      --baseline:    #383835;
+      --border:      rgba(255,255,255,0.10);
+      --series-1: #3987e5; --series-2: #199e70; --series-3: #c98500;
+      --series-4: #008300; --series-5: #9085e9; --series-6: #e66767;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px;
+  }
+  header { margin-bottom: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header p  { color: var(--text-secondary); font-size: 13px; margin-top: 2px; }
+  .asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px 16px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card .sub { color: var(--text-muted); font-size: 12px; margin: 2px 0 10px; }
+  .conn { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 999px;
+          border: 1px solid var(--border); color: var(--text-secondary); }
+  .conn.off { color: var(--status-critical); }
+  .tiles { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 10px; }
+  .tile .label { font-size: 11px; color: var(--text-muted); }
+  .tile .value { font-size: 20px; font-weight: 600; }
+  .tile .unit  { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+          padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+          color: var(--text-secondary); }
+  .chip .ico { font-size: 11px; }
+  .chip.good     .ico { color: var(--status-good); }
+  .chip.warning  .ico { color: var(--status-warning); }
+  .chip.serious  .ico { color: var(--status-serious); }
+  .chip.critical .ico { color: var(--status-critical); }
+  .chip.critical { border-color: var(--status-critical); color: var(--text-primary); }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--text-muted); }
+  .chip.on .dot { background: var(--text-secondary); border-color: var(--text-secondary); }
+  .chart { margin-top: 12px; }
+  .chart-head { display: flex; align-items: baseline; gap: 10px; }
+  .chart-head h3 { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); flex: 1; }
+  .chart-head button {
+    font: 11px system-ui, sans-serif; color: var(--text-muted);
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    padding: 1px 8px; cursor: pointer;
+  }
+  .chart-head button:hover { color: var(--text-primary); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 3px 0 2px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px;
+                 font-size: 11.5px; color: var(--text-secondary); }
+  .legend i { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+  .plot { position: relative; }
+  .plot canvas { width: 100%; height: 130px; display: block; cursor: crosshair; }
+  .tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 5;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.18); padding: 7px 10px; font-size: 11.5px;
+    min-width: 130px;
+  }
+  .tooltip .tt-time { color: var(--text-muted); margin-bottom: 3px; }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+  .tooltip .tt-row b { margin-left: auto; color: var(--text-primary); font-weight: 600;
+                       font-variant-numeric: tabular-nums; }
+  .tooltip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 4px; }
+  table.data th { text-align: right; color: var(--text-muted); font-weight: 500;
+                  border-bottom: 1px solid var(--grid); padding: 3px 6px; }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  table.data td { text-align: right; padding: 2px 6px; color: var(--text-secondary);
+                  font-variant-numeric: tabular-nums; }
+  .empty { color: var(--text-muted); font-size: 12px; padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>JESA - Asset simulators live view</h1>
+  <p>OPC UA field data polled at 1 Hz - A1 milling machine, A2 hydraulic test rig, A3 APU air compressor</p>
+</header>
+<div class="asset-grid" id="grid"></div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------- layout */
+
+const LAYOUT = {
+  A1: {
+    title: "A1 - Milling machine",
+    charts: [
+      { title: "Torque", unit: "Nm",
+        series: [{ key: "Drive/Torque_Nm", label: "Torque", slot: 1 }] },
+      { title: "Rotational speed", unit: "rpm",
+        series: [{ key: "Drive/RotationalSpeed_rpm", label: "Speed", slot: 1 }] },
+      { title: "Temperatures", unit: "K",
+        series: [{ key: "Process/AirTemperature_K", label: "Air", slot: 1 },
+                 { key: "Process/ProcessTemperature_K", label: "Process", slot: 2 }] },
+    ],
+  },
+  A2: {
+    title: "A2 - Hydraulic test rig",
+    charts: [
+      { title: "Hydraulic pressures", unit: "bar",
+        series: [1, 2, 3, 4, 5, 6].map(i =>
+          ({ key: `Hydraulic/PS${i}_bar`, label: `PS${i}`, slot: i })) },
+      { title: "Temperatures", unit: "°C",
+        series: [1, 2, 3, 4].map(i =>
+          ({ key: `Thermal/TS${i}_C`, label: `TS${i}`, slot: i })) },
+      { title: "Motor power", unit: "W",
+        series: [{ key: "Motor/Power_W", label: "Power", slot: 1 }] },
+    ],
+  },
+  A3: {
+    title: "A3 - APU air compressor",
+    charts: [
+      { title: "Pneumatic pressures", unit: "bar",
+        series: [{ key: "Pneumatic/TP2_bar", label: "TP2", slot: 1 },
+                 { key: "Pneumatic/TP3_bar", label: "TP3", slot: 2 },
+                 { key: "Pneumatic/H1_bar", label: "H1", slot: 3 },
+                 { key: "Pneumatic/DVPressure_bar", label: "DV", slot: 5 },
+                 { key: "Pneumatic/Reservoirs_bar", label: "Reservoirs", slot: 6 }] },
+      { title: "Motor current", unit: "A",
+        series: [{ key: "Motor/Current_A", label: "Current", slot: 1 }] },
+      { title: "Oil temperature", unit: "°C",
+        series: [{ key: "Oil/Temperature_C", label: "Oil", slot: 1 }] },
+    ],
+  },
+};
+
+/* --------------------------------------------------------------- helpers */
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const seriesColor = slot => css(`--series-${slot}`);
+
+function fmt(v) {
+  if (v == null || Number.isNaN(v)) return "-";
+  const a = Math.abs(v);
+  if (a >= 1000) return v.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (a >= 100) return v.toFixed(1);
+  return v.toFixed(2);
+}
+const fmtTime = ms => new Date(ms).toLocaleTimeString("en-GB");
+
+function niceTicks(lo, hi, n) {
+  if (!(hi > lo)) { hi = lo + 1; lo = lo - 1; }
+  const span = hi - lo, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+  const first = Math.ceil(lo / step) * step, ticks = [];
+  for (let v = first; v <= hi + 1e-9; v += step) ticks.push(v);
+  return ticks;
+}
+
+/* ----------------------------------------------------------- chart class */
+
+class Chart {
+  constructor(container, cfg) {
+    this.cfg = cfg;
+    this.data = null;      // {key: {t:[], v:[]}}
+    this.hoverIdx = null;
+    this.tableMode = false;
+
+    const head = document.createElement("div");
+    head.className = "chart-head";
+    head.innerHTML = `<h3>${cfg.title} (${cfg.unit})</h3>`;
+    this.btn = document.createElement("button");
+    this.btn.textContent = "Table";
+    this.btn.onclick = () => { this.tableMode = !this.tableMode;
+                               this.btn.textContent = this.tableMode ? "Chart" : "Table";
+                               this.render(); };
+    head.appendChild(this.btn);
+
+    const root = document.createElement("div");
+    root.className = "chart";
+    root.appendChild(head);
+
+    if (cfg.series.length >= 2) {
+      const legend = document.createElement("div");
+      legend.className = "legend";
+      legend.innerHTML = cfg.series.map(s =>
+        `<span><i style="background:${seriesColor(s.slot)}"></i>${s.label}</span>`).join("");
+      root.appendChild(legend);
+    }
+
+    this.plot = document.createElement("div");
+    this.plot.className = "plot";
+    this.canvas = document.createElement("canvas");
+    this.tooltip = document.createElement("div");
+    this.tooltip.className = "tooltip";
+    this.tableEl = document.createElement("div");
+    this.plot.append(this.canvas, this.tooltip, this.tableEl);
+    root.appendChild(this.plot);
+    container.appendChild(root);
+
+    this.canvas.addEventListener("pointermove", e => this.onHover(e));
+    this.canvas.addEventListener("pointerleave", () => { this.hoverIdx = null;
+                                                         this.tooltip.style.display = "none";
+                                                         this.draw(); });
+  }
+
+  update(assetData) {
+    this.data = assetData;
+    this.render();
+  }
+
+  render() {
+    this.canvas.style.display = this.tableMode ? "none" : "block";
+    this.tableEl.innerHTML = "";
+    if (this.tableMode) this.renderTable(); else this.draw();
+  }
+
+  points(key) {
+    const s = this.data && this.data.series[key];
+    return s && s.t.length ? s : null;
+  }
+
+  extent() {
+    let tLo = Infinity, tHi = -Infinity, vLo = Infinity, vHi = -Infinity, any = false;
+    for (const s of this.cfg.series) {
+      const p = this.points(s.key);
+      if (!p) continue;
+      any = true;
+      tLo = Math.min(tLo, p.t[0]); tHi = Math.max(tHi, p.t[p.t.length - 1]);
+      for (const v of p.v) { vLo = Math.min(vLo, v); vHi = Math.max(vHi, v); }
+    }
+    if (!any) return null;
+    if (vHi === vLo) { vHi += 1; vLo -= 1; }
+    const pad = (vHi - vLo) * 0.08;
+    return { tLo, tHi: Math.max(tHi, tLo + 1), vLo: vLo - pad, vHi: vHi + pad };
+  }
+
+  draw() {
+    const cv = this.canvas, dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight || 130;
+    if (!w) return;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const ctx = cv.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    ctx.font = "10.5px system-ui, sans-serif";
+
+    const ext = this.extent();
+    if (!ext) {
+      ctx.fillStyle = css("--text-muted");
+      ctx.textAlign = "center";
+      ctx.fillText("waiting for data…", w / 2, h / 2);
+      return;
+    }
+    const m = { l: 46, r: 12, t: 8, b: 18 };
+    const X = t => m.l + (t - ext.tLo) / (ext.tHi - ext.tLo) * (w - m.l - m.r);
+    const Y = v => m.t + (1 - (v - ext.vLo) / (ext.vHi - ext.vLo)) * (h - m.t - m.b);
+
+    // gridlines + y ticks (hairline, solid, recessive)
+    ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+    ctx.fillStyle = css("--text-muted"); ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (const v of niceTicks(ext.vLo, ext.vHi, 4)) {
+      const y = Math.round(Y(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
+      ctx.fillText(fmt(v), m.l - 6, y);
+    }
+    // x labels: first / last timestamp
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";  ctx.fillText(fmtTime(ext.tLo), m.l, h - 5);
+    ctx.textAlign = "right"; ctx.fillText(fmtTime(ext.tHi), w - m.r, h - 5);
+
+    // crosshair under the marks
+    if (this.hoverIdx != null) {
+      const p0 = this.points(this.cfg.series[0].key);
+      if (p0 && p0.t[this.hoverIdx] != null) {
+        const x = Math.round(X(p0.t[this.hoverIdx])) + 0.5;
+        ctx.strokeStyle = css("--baseline");
+        ctx.beginPath(); ctx.moveTo(x, m.t); ctx.lineTo(x, h - m.b); ctx.stroke();
+      }
+    }
+
+    // series lines: 2px, round join, end-dot r4 with 2px surface ring
+    for (const s of this.cfg.series) {
+      const p = this.points(s.key);
+      if (!p) continue;
+      const color = seriesColor(s.slot);
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.beginPath();
+      for (let i = 0; i < p.t.length; i++) {
+        const x = X(p.t[i]), y = Y(p.v[i]);
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+      const xe = X(p.t[p.t.length - 1]), ye = Y(p.v[p.v.length - 1]);
+      ctx.beginPath(); ctx.arc(xe, ye, 4, 0, 2 * Math.PI);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = css("--surface-1"); ctx.lineWidth = 2; ctx.stroke();
+    }
+  }
+
+  onHover(e) {
+    if (this.tableMode) return;
+    const p0 = this.points(this.cfg.series[0].key);
+    const ext = this.extent();
+    if (!p0 || !ext) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const frac = (e.clientX - rect.left - 46) / (rect.width - 46 - 12);
+    const t = ext.tLo + Math.min(Math.max(frac, 0), 1) * (ext.tHi - ext.tLo);
+    let best = 0;
+    for (let i = 1; i < p0.t.length; i++)
+      if (Math.abs(p0.t[i] - t) < Math.abs(p0.t[best] - t)) best = i;
+    this.hoverIdx = best;
+
+    const rows = this.cfg.series.map(s => {
+      const p = this.points(s.key);
+      const v = p ? p.v[Math.min(best, p.v.length - 1)] : null;
+      return `<div class="tt-row"><i style="background:${seriesColor(s.slot)}"></i>` +
+             `${s.label}<b>${fmt(v)}</b></div>`;
+    }).join("");
+    this.tooltip.innerHTML =
+      `<div class="tt-time">${fmtTime(p0.t[best])} · ${this.cfg.unit}</div>${rows}`;
+    this.tooltip.style.display = "block";
+    const xpx = e.clientX - rect.left;
+    this.tooltip.style.left = Math.min(xpx + 14, rect.width - 150) + "px";
+    this.tooltip.style.top = "6px";
+    this.draw();
+  }
+
+  renderTable() {
+    const p0 = this.points(this.cfg.series[0].key);
+    if (!p0) { this.tableEl.innerHTML = '<div class="empty">waiting for data…</div>'; return; }
+    const n = Math.min(12, p0.t.length);
+    let html = `<table class="data"><tr><th>Time</th>` +
+      this.cfg.series.map(s => `<th>${s.label}</th>`).join("") + "</tr>";
+    for (let i = p0.t.length - n; i < p0.t.length; i++) {
+      html += `<tr><td>${fmtTime(p0.t[i])}</td>` + this.cfg.series.map(s => {
+        const p = this.points(s.key);
+        return `<td>${fmt(p ? p.v[i] : null)}</td>`;
+      }).join("") + "</tr>";
+    }
+    this.tableEl.innerHTML = html + "</table>";
+  }
+}
+
+/* -------------------------------------------------------- status chips */
+
+const chip = (state, icon, text) =>
+  `<span class="chip ${state}"><span class="ico">${icon}</span>${text}</span>`;
+const toggleChip = (on, text) =>
+  `<span class="chip ${on ? "on" : ""}"><span class="dot"></span>${text}</span>`;
+const tile = (label, value, unit = "") =>
+  `<div class="tile"><div class="label">${label}</div>` +
+  `<div class="value">${value}<span class="unit"> ${unit}</span></div></div>`;
+
+function a1Status(L) {
+  const modes = { TWF: "Tool wear", HDF: "Heat dissipation", PWF: "Power",
+                  OSF: "Overstrain", RNF: "Random" };
+  let chips = L["Status/MachineFailure"]
+    ? chip("critical", "✕", "Machine failure")
+    : chip("good", "✓", "Operating");
+  for (const [key, label] of Object.entries(modes))
+    if (L[`Status/${key}`]) chips += chip("critical", "✕", label);
+  const tiles =
+    tile("Part", `${L["Part/ProductId"] ?? "-"}`, `type ${L["Part/ProductType"] ?? "-"}`) +
+    tile("Parts machined", L["Simulation/PartIndex"] ?? "-") +
+    tile("Tool wear", L["Tool/ToolWear_min"] ?? "-", "min");
+  return { chips, tiles };
+}
+
+function a2Status(L) {
+  const grade = (value, map) => map[value] || ["warning", "!"];
+  const cooler = grade(L["Condition/CoolerCondition_pct"],
+    { 100: ["good", "✓"], 20: ["serious", "▲"], 3: ["critical", "✕"] });
+  const valve = grade(L["Condition/ValveCondition_pct"],
+    { 100: ["good", "✓"], 90: ["warning", "!"], 80: ["serious", "▲"], 73: ["critical", "✕"] });
+  const pump = grade(L["Condition/PumpLeakage"],
+    { 0: ["good", "✓"], 1: ["warning", "!"], 2: ["critical", "✕"] });
+  const accu = grade(L["Condition/AccumulatorPressure_bar"],
+    { 130: ["good", "✓"], 115: ["warning", "!"], 100: ["serious", "▲"], 90: ["critical", "✕"] });
+  const chips =
+    chip(cooler[0], cooler[1], `Cooler ${L["Condition/CoolerCondition_pct"] ?? "-"}%`) +
+    chip(valve[0], valve[1], `Valve ${L["Condition/ValveCondition_pct"] ?? "-"}%`) +
+    chip(pump[0], pump[1], `Pump leak ${L["Condition/PumpLeakage"] ?? "-"}`) +
+    chip(accu[0], accu[1], `Accumulator ${L["Condition/AccumulatorPressure_bar"] ?? "-"} bar`) +
+    toggleChip(!L["Condition/StableFlag"], "Stable");
+  const tiles =
+    tile("Cycle", L["Simulation/CycleIndex"] ?? "-", "/ 2205") +
+    tile("Cycle second", L["Simulation/CycleSecond"] ?? "-", "s");
+  return { chips, tiles };
+}
+
+function a3Status(L) {
+  let chips = "";
+  chips += L["Digital/LPS"]
+    ? chip("critical", "✕", "LPS: pressure < 7 bar")
+    : chip("good", "✓", "Pressure nominal");
+  if (L["Digital/OilLevel"]) chips += chip("warning", "!", "Oil level low");
+  chips += toggleChip(L["Digital/COMP"], "COMP");
+  chips += toggleChip(L["Digital/DVElectric"], "Under load");
+  chips += toggleChip(L["Digital/Towers"], "Tower 2");
+  chips += toggleChip(L["Digital/MPG"], "MPG");
+  chips += toggleChip(L["Digital/PressureSwitch"], "Pressure switch");
+  const ts = L["Simulation/SourceTimestamp"];
+  const tiles =
+    tile("Dataset time", ts ? ts.replace("T", " ") : "-") +
+    tile("Row", (L["Simulation/RowIndex"] ?? 0).toLocaleString("en-US"));
+  return { chips, tiles };
+}
+
+const STATUS_FN = { A1: a1Status, A2: a2Status, A3: a3Status };
+
+/* ------------------------------------------------------------ page init */
+
+const cards = {};
+const grid = document.getElementById("grid");
+for (const [assetId, layout] of Object.entries(LAYOUT)) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>${layout.title} <span class="conn off" id="conn-${assetId}">offline</span></h2>
+    <div class="sub" id="sub-${assetId}"></div>
+    <div class="tiles" id="tiles-${assetId}"></div>
+    <div class="chips" id="chips-${assetId}"></div>`;
+  grid.appendChild(card);
+  cards[assetId] = { charts: layout.charts.map(cfg => new Chart(card, cfg)) };
+}
+
+async function tick() {
+  let payload;
+  try {
+    payload = await (await fetch("/api/data")).json();
+  } catch { return; }
+  for (const [assetId, data] of Object.entries(payload)) {
+    const conn = document.getElementById(`conn-${assetId}`);
+    conn.textContent = data.connected ? "live" : "offline";
+    conn.classList.toggle("off", !data.connected);
+    document.getElementById(`sub-${assetId}`).textContent =
+      data.connected ? "" : "simulator not reachable - start it with: python -m sim all";
+    if (!Object.keys(data.latest).length) continue;
+    const { chips, tiles } = STATUS_FN[assetId](data.latest);
+    document.getElementById(`tiles-${assetId}`).innerHTML = tiles;
+    document.getElementById(`chips-${assetId}`).innerHTML = chips;
+    for (const chart of cards[assetId].charts) chart.update(data);
+  }
+}
+
+tick();
+setInterval(tick, 1000);
+window.addEventListener("resize", () =>
+  Object.values(cards).forEach(c => c.charts.forEach(ch => ch.render())));
+</script>
+</body>
+</html>

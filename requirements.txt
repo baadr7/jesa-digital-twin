@@ -1,0 +1,5 @@
+asyncua>=2.0,<3
+pandas>=2.2
+numpy>=1.26
+aiohttp>=3.9
+paho-mqtt>=2.0,<3

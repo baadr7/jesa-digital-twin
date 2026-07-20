@@ -1,0 +1,98 @@
+# JESA Digital Twin — Phase 4 Infrastructure Stack
+# Reference: docs/uns-spec.md
+#
+# Services:
+#   mosquitto  — Eclipse Mosquitto MQTT broker (UNS backbone)
+#   influxdb   — InfluxDB 2.x time-series database (telemetry historian)
+#   telegraf   — Telegraf agent (MQTT consumer → InfluxDB writer)
+#
+# Usage:
+#   docker compose up -d              # start all services
+#   docker compose logs -f mosquitto  # follow broker logs
+#   docker compose down -v            # stop and remove volumes
+#
+# The Python gateway (uns/) and simulators (sim/) run on the host,
+# connecting to Mosquitto at localhost:1883 and OPC UA servers at
+# localhost:4840-4843.
+
+services:
+
+  # ── MQTT Broker ──────────────────────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: jesa-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"     # MQTT TCP
+      - "9001:9001"     # MQTT WebSocket
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ── Time-Series Database ─────────────────────────────────────────────
+  influxdb:
+    image: influxdb:2
+    container_name: jesa-influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"     # InfluxDB HTTP API + UI
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: jesa
+      DOCKER_INFLUXDB_INIT_PASSWORD: jesa-dev-2026
+      DOCKER_INFLUXDB_INIT_ORG: jesa
+      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: jesa-dev-token
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Telegraf Agent (MQTT → InfluxDB) ─────────────────────────────────
+  telegraf:
+    image: telegraf:1.34
+    container_name: jesa-telegraf
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    environment:
+      INFLUXDB_TOKEN: jesa-dev-token
+    volumes:
+      - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+
+  # ── ML Inference Service ─────────────────────────────────────────────
+  ml-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: jesa-ml-inference
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      MODEL_DIR: /app/notebooks/models
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
+  influxdb-data:
+  influxdb-config:

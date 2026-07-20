@@ -139,8 +139,8 @@ A1 = milling machine, A2 = hydraulic test rig, A3 = APU air compressor. Datasets
   - A2: condition estimator trained and saved;
   - A3: anomaly detector trained and saved (PyTorch LSTM Autoencoder).
   Predictions flow **back into the UNS** so Grafana shows them next to raw telemetry — that's what makes it a digital twin loop, not just a dashboard.
-- [ ] **+3D (stretch)**: Three.js web scene (or Unity) with the three assets colored by live health score via MQTT-over-WebSocket from the broker.
-- **Deliverable**: dashboards, 3 model services with evaluation reports, optional 3D viewer.
+- [x] **+3D (stretch)**: Three.js web scene (or Unity) with the three assets colored by live health score via MQTT-over-WebSocket from the broker.
+- **Deliverable**: dashboards, 3 model services with evaluation reports, and an immersive 3D digital twin dashboard.
 
 ### Phase 6 & 7 — MLOps, DevOps & Perfectionnement ✅ (done)
 - [x] CI/CD Pipeline via GitHub Actions (`.github/workflows/ci.yml`)

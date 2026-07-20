@@ -90,6 +90,9 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
       MODEL_DIR: /app/notebooks/models
+    volumes:
+      - ./uns:/app/uns
+      - ./notebooks/models:/app/notebooks/models
 
   # ── Grafana (Visualization) ──────────────────────────────────────────
   grafana:

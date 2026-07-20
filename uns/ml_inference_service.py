@@ -21,15 +21,28 @@ MODEL_DIR = os.getenv("MODEL_DIR", "notebooks/models")
 
 class A1Predictor:
     def __init__(self):
-        log.info(f"Loading A1 model from {MODEL_DIR}/a1_classifier.joblib")
-        try:
-            bundle = joblib.load(f"{MODEL_DIR}/a1_classifier.joblib")
-            self.model = bundle["model"]
-            self.scaler = bundle["scaler"]
-            self.type_encoder = bundle["type_encoder"]
-        except Exception as e:
-            log.error(f"Failed to load A1 model: {e}")
-            self.model = None
+        self.model_path = f"{MODEL_DIR}/a1_classifier.joblib"
+        self.model = None
+        self.scaler = None
+        self.type_encoder = None
+        self.model_mtime = 0
+        self.load_model()
+
+    def load_model(self):
+        if not os.path.exists(self.model_path):
+            return
+        current_mtime = os.path.getmtime(self.model_path)
+        if current_mtime > self.model_mtime:
+            log.info(f"Loading/Reloading A1 model from {self.model_path}")
+            try:
+                bundle = joblib.load(self.model_path)
+                self.model = bundle["model"]
+                self.scaler = bundle["scaler"]
+                self.type_encoder = bundle["type_encoder"]
+                self.model_mtime = current_mtime
+                log.info("Model hot-reloaded successfully.")
+            except Exception as e:
+                log.error(f"Failed to load A1 model: {e}")
 
         self.state = {
             "Type": "L",
@@ -64,6 +77,7 @@ class A1Predictor:
         return None
 
     def predict(self):
+        self.load_model()
         if not self.model:
             return None
         

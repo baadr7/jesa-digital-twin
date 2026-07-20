@@ -1,0 +1,31 @@
+{
+  "title": "JESA Digital Twin - Overview",
+  "timezone": "browser",
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "A1 Milling Machine - Failure Probability",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "query": "from(bucket: \"telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"A1\")\n  |> filter(fn: (r) => r[\"topic\"] == \"jesa/site1/workshop/milling/A1/analytics/machine_failure\")\n  |> filter(fn: (r) => r[\"_field\"] == \"probability\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "datasource": { "type": "influxdb", "uid": "InfluxDB" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.8 }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

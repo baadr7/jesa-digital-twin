@@ -91,8 +91,29 @@ services:
       MQTT_PORT: 1883
       MODEL_DIR: /app/notebooks/models
 
+  # ── Grafana (Visualization) ──────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.1.5
+    container_name: jesa-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=jesa-admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
 volumes:
   mosquitto-data:
   mosquitto-log:
   influxdb-data:
   influxdb-config:
+  grafana-data:

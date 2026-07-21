@@ -1,12 +1,17 @@
 import pytest
 import numpy as np
+from pathlib import Path
 from uns.ml_inference_service import A1Predictor
 
+A1_MODEL_PATH = Path("notebooks/models/a1_classifier.joblib")
+
+@pytest.mark.skipif(not A1_MODEL_PATH.exists(), reason="A1 model file not found")
 def test_a1_predictor_initialization():
     predictor = A1Predictor()
     assert predictor.model is not None, "A1 model failed to load. Ensure 'notebooks/models/a1_classifier.joblib' exists."
     assert "AirTemp_K" in predictor.state
 
+@pytest.mark.skipif(not A1_MODEL_PATH.exists(), reason="A1 model file not found")
 def test_a1_predictor_predict():
     predictor = A1Predictor()
     # Force a normal state

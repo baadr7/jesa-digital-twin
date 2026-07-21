@@ -76,8 +76,53 @@ services:
     volumes:
       - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
 
+  # ── ML Inference Service ─────────────────────────────────────────────
+  ml-inference:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    container_name: jesa-ml-inference
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      MODEL_DIR: /app/notebooks/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "from uns.ml_inference_service import A1Predictor, A2Predictor, A3Predictor; print('ok')"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - ./uns:/app/uns
+      - ./notebooks/models:/app/notebooks/models
+
+  # ── Grafana (Visualization) ──────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.1.5
+    container_name: jesa-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=jesa-admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
 volumes:
   mosquitto-data:
   mosquitto-log:
   influxdb-data:
   influxdb-config:
+  grafana-data:

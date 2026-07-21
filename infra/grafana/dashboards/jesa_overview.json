@@ -1,0 +1,227 @@
+{
+  "title": "JESA Digital Twin - Fleet Overview",
+  "timezone": "browser",
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "A1 Milling Machine - Failure Probability (ML Predictor)",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"A1\")\n  |> filter(fn: (r) => r[\"topic\"] == \"jesa/site1/workshop/milling/A1/analytics/machine_failure\")\n  |> filter(fn: (r) => r[\"_field\"] == \"probability\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "InfluxDB"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 0.8
+              }
+            ]
+          },
+          "custom": {
+            "spanNulls": true
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "A2 Hydraulic Test Rig - Cooler Condition (ML Predictor)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"A2\")\n  |> filter(fn: (r) => r[\"topic\"] == \"jesa/site1/workshop/hydraulics/A2/analytics/cooler_condition\")\n  |> filter(fn: (r) => r[\"_field\"] == \"v\")\n  |> aggregateWindow(every: v.windowPeriod, fn: last, createEmpty: false)\n  |> yield(name: \"last\")",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "InfluxDB"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 19
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "A3 APU Compressor - Anomaly Score (ML Autoencoder + IF)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"A3\")\n  |> filter(fn: (r) => r[\"topic\"] == \"jesa/site1/fleet/apu/A3/analytics/anomaly\")\n  |> filter(fn: (r) => r[\"_field\"] == \"score\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "InfluxDB"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.34
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "A2 Hydraulic Test Rig - Cooling Efficiency %",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"A2\")\n  |> filter(fn: (r) => r[\"topic\"] == \"jesa/site1/workshop/hydraulics/A2/kpis/cooling_efficiency_pct\")\n  |> filter(fn: (r) => r[\"_field\"] == \"v\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "InfluxDB"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 15
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "A3 APU Compressor - Motor Current (A)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"telemetry\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r[\"_measurement\"] == \"A3\")\n  |> filter(fn: (r) => r[\"topic\"] == \"jesa/site1/fleet/apu/A3/motor/current_a\")\n  |> filter(fn: (r) => r[\"_field\"] == \"v\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "InfluxDB"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 6
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

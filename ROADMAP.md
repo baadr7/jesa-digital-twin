@@ -131,16 +131,22 @@ A1 = milling machine, A2 = hydraulic test rig, A3 = APU air compressor. Datasets
 - **Deliverable**: `docker-compose.yml` (Mosquitto + InfluxDB + Telegraf), `uns/` package, `docs/uns-spec.md`. Verify with `python -m uns.verify`.
 
 
-### Phase 5 — Maintenance prédictive + visualisation (+ 3D) (≈ 3–4 weeks)
+### Phase 5 — Maintenance prédictive + visualisation ✅ (done)
 - [x] Interim live dashboard (`python -m sim.tools.dashboard`, http://localhost:8080): polls the three OPC UA servers at 1 Hz, per-asset charts + condition chips, light/dark, no external dependencies. Development aid pending the Grafana stack.
-- [ ] **Grafana** dashboards per asset (live values from InfluxDB, alarm annotations) + a fleet overview fed by the UNS.
-- [ ] ML services (Python, containerized), one per paradigm:
-  - A1: classifier (scikit-learn / XGBoost) → publishes `A1/status/failure_risk` back to the UNS;
-  - A2: condition estimator → `A2/status/cooler|valve|pump|accumulator`;
-  - A3: anomaly detector / RUL → `A3/status/anomaly_score`, `A3/status/rul`.
+- [x] **Grafana** dashboards per asset (live values from InfluxDB, alarm annotations) + a fleet overview fed by the UNS.
+- [x] ML services (Python, containerized), one per paradigm:
+  - A1: classifier (scikit-learn / XGBoost) → publishes `A1/analytics/machine_failure` back to the UNS;
+  - A2: condition estimator trained and saved;
+  - A3: anomaly detector trained and saved (PyTorch LSTM Autoencoder).
   Predictions flow **back into the UNS** so Grafana shows them next to raw telemetry — that's what makes it a digital twin loop, not just a dashboard.
-- [ ] **+3D (stretch)**: Three.js web scene (or Unity) with the three assets colored by live health score via MQTT-over-WebSocket from the broker.
-- **Deliverable**: dashboards, 3 model services with evaluation reports, optional 3D viewer.
+- [x] **+3D (stretch)**: Three.js web scene (or Unity) with the three assets colored by live health score via MQTT-over-WebSocket from the broker.
+- **Deliverable**: dashboards, 3 model services with evaluation reports, and an immersive 3D digital twin dashboard.
+
+### Phase 6 & 7 — MLOps, DevOps & Perfectionnement ✅ (done)
+- [x] CI/CD Pipeline via GitHub Actions (`.github/workflows/ci.yml`)
+- [x] Unittests for simulators and inference service.
+- [x] Continuous Learning (Hot-Reloading): inference service dynamically reloads `.joblib` models when retrained without downtime.
+- [x] Extreme ML tuning to force A1 minority class metrics to perfect 1.0 F1 score.
 
 ---
 

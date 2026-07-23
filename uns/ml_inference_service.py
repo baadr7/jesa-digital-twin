@@ -329,13 +329,15 @@ class A3Predictor:
         # Because we receive them separately, we aggregate them by a rounded timestamp
         now = int(time.time())
         if not hasattr(self, 'current_row') or self.current_row.get('ts') != now:
-            if hasattr(self, 'current_row') and len(self.current_row) > 1:
+            if hasattr(self, 'current_row'):
                 # push previous row to history, filling missing with previous values if possible
                 row_data = {c: self.current_row.get(c, self.history[-1][c] if self.history else 0.0) for c in self.raw_cols}
                 self.history.append(row_data)
+                log.info(f"A3 pushed row to history (new ts={now}), len(history)={len(self.history)}")
             self.current_row = {'ts': now}
             
         suffix = topic.split("A3/")[-1]
+        log.info(f"A3 update: topic={topic}, suffix={suffix}")
         mapping = {
             "pneumatic/tp2_bar": "TP2", "pneumatic/tp3_bar": "TP3", "pneumatic/h1_bar": "H1",
             "pneumatic/dv_pressure_bar": "DV_pressure", "pneumatic/reservoirs_bar": "Reservoirs",
@@ -345,12 +347,16 @@ class A3Predictor:
         col = mapping.get(suffix)
         if col:
             self.current_row[col] = float(value)
+            log.info(f"A3 added {col} = {value} to current_row, now len={len(self.current_row)}")
             
         # Predict every 10 seconds if we have enough history (reduced to 60s for demo purposes)
-        if time.time() - self.last_predict >= 10.0:
-            self.last_predict = time.time()
+        current_time = time.time()
+        time_since_last_predict = current_time - self.last_predict
+        log.info(f"A3 time check: current={current_time}, last_predict={self.last_predict}, delta={time_since_last_predict}")
+        if time_since_last_predict >= 10.0:
+            self.last_predict = current_time
             log.info(f"A3 debug: len(history)={len(self.history)}, current_row={len(self.current_row)}")
-            if len(self.history) >= 60:
+            if len(self.history) >= 10:
                 res = self.predict()
                 log.info(f"A3 prediction result: {res}")
                 return res

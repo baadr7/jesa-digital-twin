@@ -6,11 +6,22 @@ __pycache__/
 # Notebook outputs (figures are embedded as base64 inside .ipynb)
 notebooks/*.png
 
+# Model files (too large for git — generate locally)
+notebooks/models/*.joblib
+notebooks/models/*.pth
+notebooks/models/*.png
+
 # Raw datasets (too large for git — download separately)
 ai4i+2020+predictive+maintenance+dataset/
 condition+monitoring+of+hydraulic+systems/
 metropt+3+dataset/
 sim/data/*.npz
+
+# Temporary test files
+simple_mqtt_listener.py
+test_mqtt_subscribe.py
+test_response.html
+debug-twin-ui-server-check.md
 
 # IDE
 .idea/

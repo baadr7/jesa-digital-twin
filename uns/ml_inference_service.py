@@ -66,6 +66,10 @@ class A1Predictor:
             "ToolWear_min": 0.0
         }
         self.last_predict = 0.0
+        
+        # Metrics tracking
+        self.prediction_count = 0
+        self.failure_count = 0
 
     def load_model(self):
         if not os.path.exists(self.model_path):
@@ -138,10 +142,19 @@ class A1Predictor:
             x_scaled = self.scaler.transform(x_df)
             pred = self.model.predict(x_scaled)[0]
             prob = self.model.predict_proba(x_scaled)[0][1]
+            
+        # Update metrics
+        self.prediction_count += 1
+        if pred == 1:
+            self.failure_count += 1
         
         return {
             "machine_failure": int(pred),
-            "failure_probability": float(prob)
+            "failure_probability": float(prob),
+            "metrics": {
+                "prediction_count": self.prediction_count,
+                "failure_count": self.failure_count
+            }
         }
 
 # ==============================================================================
@@ -155,6 +168,10 @@ class A2Predictor:
         self.models_loaded = False
         self.load_models()
         self.last_cycle_index = -1
+        
+        # Metrics tracking
+        self.cycle_count = 0
+        self.degraded_cooler_count = 0
 
     def load_models(self):
         try:
@@ -253,11 +270,21 @@ class A2Predictor:
         x = np.array([[row.get(c, 0.0) for c in self.feature_columns]])
         x_scaled = self.scaler.transform(x)
         
+        # Update metrics
+        self.cycle_count += 1
+        cooler_pred = int(self.model_cooler.predict(x_scaled)[0])
+        if cooler_pred < 100:
+            self.degraded_cooler_count += 1
+        
         return {
-            "cooler": int(self.model_cooler.predict(x_scaled)[0]),
+            "cooler": cooler_pred,
             "valve": int(self.model_valve.predict(x_scaled)[0]),
             "pump_leak": int(self.model_pumpleak.predict(x_scaled)[0]),
-            "accumulator": int(self.model_accumulator.predict(x_scaled)[0])
+            "accumulator": int(self.model_accumulator.predict(x_scaled)[0]),
+            "metrics": {
+                "cycle_count": self.cycle_count,
+                "degraded_cooler_count": self.degraded_cooler_count
+            }
         }
 
 # ==============================================================================
@@ -270,6 +297,10 @@ class A3Predictor:
         self.last_predict = 0.0
         self.models_loaded = False
         self.load_models()
+        
+        # Metrics tracking
+        self.prediction_count = 0
+        self.anomaly_count = 0
 
     def load_models(self):
         try:
@@ -369,9 +400,19 @@ class A3Predictor:
         # which is fine for the demo
         ensemble_score = float((if_score + ae_score) / 2)
         
+        # Update metrics
+        self.prediction_count += 1
+        is_anomaly = int(ensemble_score > self.threshold)
+        if is_anomaly:
+            self.anomaly_count += 1
+        
         return {
             "anomaly_score": ensemble_score,
-            "is_anomaly": int(ensemble_score > self.threshold)
+            "is_anomaly": is_anomaly,
+            "metrics": {
+                "prediction_count": self.prediction_count,
+                "anomaly_count": self.anomaly_count
+            }
         }
 
 # ==============================================================================
@@ -400,6 +441,17 @@ def on_message(client, userdata, msg):
                     "q": "good",
                     "probability": res["failure_probability"]
                 }), qos=0)
+                # Publish metrics
+                client.publish("jesa/site1/workshop/milling/A1/metrics/prediction_count", json.dumps({
+                    "ts": ts,
+                    "v": res["metrics"]["prediction_count"],
+                    "q": "good"
+                }), qos=0)
+                client.publish("jesa/site1/workshop/milling/A1/metrics/failure_count", json.dumps({
+                    "ts": ts,
+                    "v": res["metrics"]["failure_count"],
+                    "q": "good"
+                }), qos=0)
                 
         # Route to A2
         elif "/A2/" in msg.topic:
@@ -410,6 +462,17 @@ def on_message(client, userdata, msg):
                 client.publish("jesa/site1/workshop/hydraulics/A2/analytics/valve_condition", json.dumps({"ts": ts, "v": res["valve"], "q": "good"}), qos=0)
                 client.publish("jesa/site1/workshop/hydraulics/A2/analytics/pump_leakage", json.dumps({"ts": ts, "v": res["pump_leak"], "q": "good"}), qos=0)
                 client.publish("jesa/site1/workshop/hydraulics/A2/analytics/accumulator_pressure", json.dumps({"ts": ts, "v": res["accumulator"], "q": "good"}), qos=0)
+                # Publish metrics
+                client.publish("jesa/site1/workshop/hydraulics/A2/metrics/cycle_count", json.dumps({
+                    "ts": ts,
+                    "v": res["metrics"]["cycle_count"],
+                    "q": "good"
+                }), qos=0)
+                client.publish("jesa/site1/workshop/hydraulics/A2/metrics/degraded_cooler_count", json.dumps({
+                    "ts": ts,
+                    "v": res["metrics"]["degraded_cooler_count"],
+                    "q": "good"
+                }), qos=0)
 
         # Route to A3
         elif "/A3/" in msg.topic:
@@ -421,6 +484,17 @@ def on_message(client, userdata, msg):
                     "v": res["is_anomaly"],
                     "q": "good",
                     "score": res["anomaly_score"]
+                }), qos=0)
+                # Publish metrics
+                client.publish("jesa/site1/fleet/apu/A3/metrics/prediction_count", json.dumps({
+                    "ts": ts,
+                    "v": res["metrics"]["prediction_count"],
+                    "q": "good"
+                }), qos=0)
+                client.publish("jesa/site1/fleet/apu/A3/metrics/anomaly_count", json.dumps({
+                    "ts": ts,
+                    "v": res["metrics"]["anomaly_count"],
+                    "q": "good"
                 }), qos=0)
                 
     except Exception as e:

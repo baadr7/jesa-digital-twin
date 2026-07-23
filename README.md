@@ -1,5 +1,8 @@
 # JESA Digital Twin
 
+## 📄 Internship Project Report
+For a full evaluation of this project as an internship deliverable at JESA, including proposed enhancements, see [INTERNSHIP_PROJECT_REPORT.md](file:///c:\Users\MSI\Documents\jesa\INTERNSHIP_PROJECT_REPORT.md).
+
 ## Overview
 JESA Digital Twin is an Industry 4.0 predictive maintenance platform that simulates industrial assets, collects telemetry via OPC UA, runs ML models for anomaly/failure prediction, and provides a 3D interactive visualization of the factory floor!
 
@@ -35,6 +38,13 @@ JESA Digital Twin is an Industry 4.0 predictive maintenance platform that simula
 ```
 
 ## Quickstart
+### Step 0: Download Datasets (First Time Only)
+Run the dataset setup script to automatically download and organize all required datasets:
+```bash
+python setup_datasets.py
+```
+*(Note: The MetroPT-3 dataset requires a Kaggle account; see script output for manual download instructions if needed.)*
+
 ### Step 1: Start Docker Services
 ```bash
 cd jesa

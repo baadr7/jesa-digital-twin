@@ -824,10 +824,10 @@ function renderAnalyticsPage() {
             name: 'CNC Failure Predictor',
             asset: 'A1', color: 'var(--a1-color)',
             type: 'Binary Classification',
-            algo: 'XGBoost',
-            dataset: 'AI4I 2020 (10 000 samples)',
-            accuracy: '—', f1: '—', precision: '—', recall: '—',
-            note: 'Notebook outputs not recorded — re-run A1_ML notebook to populate metrics',
+            algo: 'XGBoost + SMOTE',
+            dataset: 'AI4I 2020 (10 000 samples, 3.4% failure rate)',
+            accuracy: '97.05%', f1: '82.75% (macro) / 67.04% (binary)', precision: '54.05%', recall: '88.24%',
+            note: 'ROC-AUC = 0.9845 · Avg Precision = 0.8657. High recall (88%) is the priority given the cost of missed failures. Low precision reflects the 28.5:1 class imbalance.',
             status: 'active',
         },
         {
@@ -856,34 +856,34 @@ function renderAnalyticsPage() {
         },
     ];
 
-    // Live MQTT telemetry values read from DOM
-    const liveA1  = document.getElementById('a1-prob')?.textContent  || '—';
-    const liveA2c = document.getElementById('a2-cooler')?.textContent || '—';
-    const liveA2v = document.getElementById('a2-valve')?.textContent  || '—';
-    const liveA3  = document.getElementById('a3-score')?.textContent  || '—';
+    // Live MQTT telemetry — read from vizData ring buffers (always up to date)
+    const liveA1  = vizData.A1.failureProb.length   ? vizData.A1.failureProb.at(-1).toFixed(1) + '%' : (document.getElementById('a1-prob')?.textContent  || '—');
+    const liveA2c = vizData.A2.cooler.length         ? vizData.A2.cooler.at(-1).toFixed(0)      + '%' : (document.getElementById('a2-cooler')?.textContent || '—');
+    const liveA2v = vizData.A2.valve.length          ? vizData.A2.valve.at(-1).toFixed(0)       + '%' : (document.getElementById('a2-valve')?.textContent  || '—');
+    const liveA3  = vizData.A3.anomalyScore.length   ? vizData.A3.anomalyScore.at(-1).toFixed(3)      : (document.getElementById('a3-score')?.textContent  || '—');
 
     page.innerHTML = `
         <div class="page-container">
             <h1 class="page-title">Analytics</h1>
 
-            <!-- Live inference KPIs -->
+            <!-- Live inference KPIs — IDs allow onMessageArrived to keep them updated -->
             <h2 class="section-title">Live Inference Values</h2>
             <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
                 <div class="kpi-card">
                     <div class="kpi-card-label">A1 — Failure Prob.</div>
-                    <div class="kpi-card-value" style="color:var(--a1-color);font-size:22px">${liveA1}</div>
+                    <div class="kpi-card-value" id="an-kpi-a1" style="color:var(--a1-color);font-size:22px">${liveA1}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">A2 — Cooler</div>
-                    <div class="kpi-card-value" style="color:var(--a2-color);font-size:22px">${liveA2c}</div>
+                    <div class="kpi-card-value" id="an-kpi-a2c" style="color:var(--a2-color);font-size:22px">${liveA2c}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">A2 — Valve</div>
-                    <div class="kpi-card-value" style="color:var(--a2-color);font-size:22px">${liveA2v}</div>
+                    <div class="kpi-card-value" id="an-kpi-a2v" style="color:var(--a2-color);font-size:22px">${liveA2v}</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">A3 — Anomaly Score</div>
-                    <div class="kpi-card-value" style="color:var(--a3-color);font-size:22px">${liveA3}</div>
+                    <div class="kpi-card-value" id="an-kpi-a3" style="color:var(--a3-color);font-size:22px">${liveA3}</div>
                 </div>
             </div>
 
@@ -1845,6 +1845,15 @@ function onMessageArrived(message) {
 
         // Live-refresh visualisation page on every message
         if (currentPage === 'visualisation') _vizRefreshCharts();
+
+        // Live-refresh analytics KPI strip on every message
+        if (currentPage === 'analytics') {
+            const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+            if (vizData.A1.failureProb.length)   setEl('an-kpi-a1',  vizData.A1.failureProb.at(-1).toFixed(1) + '%');
+            if (vizData.A2.cooler.length)         setEl('an-kpi-a2c', vizData.A2.cooler.at(-1).toFixed(0)      + '%');
+            if (vizData.A2.valve.length)          setEl('an-kpi-a2v', vizData.A2.valve.at(-1).toFixed(0)       + '%');
+            if (vizData.A3.anomalyScore.length)   setEl('an-kpi-a3',  vizData.A3.anomalyScore.at(-1).toFixed(3));
+        }
 
     } catch (e) {
         console.error('Parse error:', e);

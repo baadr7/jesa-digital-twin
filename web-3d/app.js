@@ -827,7 +827,7 @@ function renderAnalyticsPage() {
             algo: 'XGBoost + SMOTE (7 models)',
             dataset: 'AI4I 2020 (10 000 samples, 3.4% failure rate)',
             accuracy: '97.05%', f1: '82.75% macro / Binary F1: 81.75%', precision: '54.05%', recall: '88.24%',
-            note: 'ROC-AUC=0.9855 · AP=0.8657. Per-mode: HDF F1=0.949 · PWF F1=0.929 · OSF F1=1.000 · TWF F1=0.071 (46 events) · RNF F1=0.000 (19 events — random, undetectable by design).',
+            note: 'ROC-AUC=0.9855 · AP=0.8657. Per-mode: OSF F1=1.000 · PWF F1=0.929 · HDF F1=0.949 · TWF F1=0.071 (46 events, extreme imbalance) · RNF F1=0.000 ⚠ EXPECTED — RNF are Random Failures with zero sensor correlation. No ML model can predict them. 19 events / 10 000 (0.19%), [CHECK] is documented in notebook.',
             status: 'active',
         },
         {

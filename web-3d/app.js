@@ -263,7 +263,35 @@ function restorePanelScene() {
 }
 
 // Asset detail panel functions
+let _currentDetailAsset = null;   // track which asset is open for live refresh
+
+function refreshDetailPanel() {
+    if (!_currentDetailAsset) return;
+    const setD = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    switch (_currentDetailAsset) {
+        case 'A1':
+            setD('detail-live-0', getTextContent('a1-status'));
+            setD('detail-live-1', getTextContent('a1-prob'));
+            setD('detail-live-2', getTextContent('a1-last'));
+            setD('detail-live-3', getTextContent('a1-chip'));
+            break;
+        case 'A2':
+            setD('detail-live-0', getTextContent('a2-cooler'));
+            setD('detail-live-1', getTextContent('a2-valve'));
+            setD('detail-live-2', getTextContent('a2-last'));
+            setD('detail-live-3', getTextContent('a2-chip'));
+            break;
+        case 'A3':
+            setD('detail-live-0', getTextContent('a3-status'));
+            setD('detail-live-1', getTextContent('a3-score'));
+            setD('detail-live-2', getTextContent('a3-last'));
+            setD('detail-live-3', getTextContent('a3-chip'));
+            break;
+    }
+}
+
 function openAssetDetail(assetId) {
+    _currentDetailAsset = assetId;
     const overlay = document.getElementById('asset-detail-overlay');
     const panel = document.getElementById('asset-detail-panel');
     const content = document.getElementById('detail-content');
@@ -378,11 +406,11 @@ function openAssetDetail(assetId) {
         </div>
         
         <div class="detail-section">
-            <h3>Performance</h3>
-            ${performance.map(p => `
+            <h3>Performance <span style="font-size:11px;color:var(--accent-cyan);font-weight:400;margin-left:8px">● LIVE</span></h3>
+            ${performance.map((p, i) => `
                 <div class="detail-item">
                     <span>${p.label}</span>
-                    <span class="value">${p.value}</span>
+                    <span class="value" id="detail-live-${i}">${p.value}</span>
                 </div>
             `).join('')}
         </div>
@@ -402,6 +430,7 @@ function openAssetDetail(assetId) {
 }
 
 function closeAssetDetail() {
+    _currentDetailAsset = null;   // stop live refresh
     const overlay = document.getElementById('asset-detail-overlay');
     const panel = document.getElementById('asset-detail-panel');
     
@@ -754,6 +783,49 @@ function renderVisualisationPage() {
     });
 }
 
+// =====================================================================
+//  ANALYTICS — Live refresh helper
+// =====================================================================
+function _refreshAnalyticsDynamic() {
+    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    const setStyle = (id, prop, val) => { const el = document.getElementById(id); if (el) el.style[prop] = val; };
+
+    // KPI numeric values from ring buffers
+    if (vizData.A1.failureProb.length) {
+        const v = vizData.A1.failureProb.at(-1).toFixed(1) + '%';
+        setEl('an-kpi-a1', v);
+        setStyle('an-kpi-a1', 'color', parseFloat(v) > 20 ? 'var(--accent-red)' : parseFloat(v) > 5 ? 'var(--accent-amber)' : 'var(--a1-color)');
+    }
+    if (vizData.A2.cooler.length) {
+        const v = vizData.A2.cooler.at(-1);
+        setEl('an-kpi-a2c', v.toFixed(0) + '%');
+        setStyle('an-kpi-a2c', 'color', v < 20 ? 'var(--accent-red)' : v < 100 ? 'var(--accent-amber)' : 'var(--a2-color)');
+    }
+    if (vizData.A2.valve.length) {
+        const v = vizData.A2.valve.at(-1);
+        setEl('an-kpi-a2v', v.toFixed(0) + '%');
+        setStyle('an-kpi-a2v', 'color', v < 80 ? 'var(--accent-red)' : v < 90 ? 'var(--accent-amber)' : 'var(--a2-color)');
+    }
+    if (vizData.A3.anomalyScore.length) {
+        const v = vizData.A3.anomalyScore.at(-1);
+        setEl('an-kpi-a3', v.toFixed(3));
+        setStyle('an-kpi-a3', 'color', v > 0.7 ? 'var(--accent-red)' : v > 0.4 ? 'var(--accent-amber)' : 'var(--a3-color)');
+    }
+
+    // Asset status badges in analytics
+    ['a1','a2','a3'].forEach(id => {
+        const badge = document.getElementById('an-badge-' + id);
+        if (!badge) return;
+        const status = _getAssetStatus(id);
+        badge.className = 'status-badge ' + (status === 'initializing' ? 'warning' : status);
+        badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    });
+
+    // Live message count + uptime in analytics
+    setEl('an-msg-count', msgCount.toLocaleString());
+    setEl('an-uptime', _uptimeStr());
+}
+
 function renderOverviewPage() {
     const page = document.getElementById('page-overview');
 
@@ -827,7 +899,7 @@ function renderAnalyticsPage() {
             algo: 'XGBoost + SMOTE (7 models)',
             dataset: 'AI4I 2020 (10 000 samples, 3.4% failure rate)',
             accuracy: '97.05%', f1: '82.75% macro / Binary F1: 81.75%', precision: '54.05%', recall: '88.24%',
-            note: 'ROC-AUC=0.9855 · AP=0.8657. Per-mode: OSF F1=1.000 · PWF F1=0.929 · HDF F1=0.949 · TWF F1=0.071 (46 events, extreme imbalance) · RNF F1=0.000 ⚠ EXPECTED — RNF are Random Failures with zero sensor correlation. No ML model can predict them. 19 events / 10 000 (0.19%), [CHECK] is documented in notebook.',
+            note: 'ROC-AUC=0.9855 · AP=0.8657. Per-mode: OSF F1=1.000 · PWF F1=0.929 · HDF F1=0.949 · TWF F1=0.115 Recall=0.500 (t=0.35, SMOTE + threshold tuned on original data) · RNF F1=0.029 Recall=0.500 (t=0.05, near-zero sensor correlation — truly random failures, threshold forced low to capture any signal).',
             status: 'active',
         },
         {
@@ -884,6 +956,30 @@ function renderAnalyticsPage() {
                 <div class="kpi-card">
                     <div class="kpi-card-label">A3 — Anomaly Score</div>
                     <div class="kpi-card-value" id="an-kpi-a3" style="color:var(--a3-color);font-size:22px">${liveA3}</div>
+                </div>
+            </div>
+
+            <!-- Live session stats + asset status row -->
+            <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-top:8px">
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Session Uptime</div>
+                    <div class="kpi-card-value" id="an-uptime" style="color:var(--accent-cyan);font-size:18px">—</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">MQTT Messages</div>
+                    <div class="kpi-card-value" id="an-msg-count" style="color:var(--accent-cyan);font-size:18px">—</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A1 Status</div>
+                    <div style="padding-top:6px"><span class="status-badge warning" id="an-badge-a1">Initializing</span></div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A2 Status</div>
+                    <div style="padding-top:6px"><span class="status-badge warning" id="an-badge-a2">Initializing</span></div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A3 Status</div>
+                    <div style="padding-top:6px"><span class="status-badge warning" id="an-badge-a3">Initializing</span></div>
                 </div>
             </div>
 
@@ -954,6 +1050,9 @@ function renderAnalyticsPage() {
             </div>
         </div>
     `;
+
+    // Immediate fill of live values
+    _refreshAnalyticsDynamic();
 }
 
 const documentationMarkdown = `
@@ -973,43 +1072,47 @@ The JESA Digital Twin system consists of three main components:
 
 ### Asset A1: CNC Milling Machine
 - **Location**: Workshop Zone 1
-- **Sensors**: Vibration, Temperature, Current
-- **Data Frequency**: 100 Hz
+- **Sensors**: Air temperature (K), Process temperature (K), Rotational speed (rpm), Torque (Nm), Tool wear (min)
+- **Data Frequency**: ~1 Hz (event-based, one sample per machined part ~5–10 s)
+- **ML Model**: XGBoost binary classifier + 5 per-mode classifiers (TWF, HDF, PWF, OSF, RNF)
 
 ### Asset A2: Hydraulic System
 - **Location**: Workshop Zone 1
-- **Sensors**: Pressure, Temperature, Flow Rate
-- **Data Frequency**: 50 Hz
+- **Sensors**: 6× pressure (bar) at 100 Hz, 2× flow (l/min) at 10 Hz, 4× temperature (°C) at 1 Hz, vibration (mm/s) at 1 Hz, 3× virtual KPIs at 1 Hz
+- **Data Frequency**: Published at 1 Hz (downsampled from 100 Hz raw); predictions per cycle (~60 s)
+- **ML Model**: XGBoost — 4 independent condition classifiers (Cooler, Valve, Pump, Accumulator)
 
 ### Asset A3: APU Compressor
 - **Location**: Workshop Zone 2
-- **Sensors**: Vibration, Acoustic Emission
-- **Data Frequency**: 200 Hz
+- **Sensors**: TP2, TP3, H1, DV_pressure, Reservoirs (bar), Oil temperature (°C), Motor current (A), COMP (digital)
+- **Data Frequency**: 1 Hz continuous stream (replayed at 60× speed)
+- **ML Model**: Ensemble — Isolation Forest + LSTM Autoencoder (anomaly detection)
 
 ## <a id="mqtt">MQTT Topic Schema</a>
 
 \`\`\`
-jesa/
-└── site1/
-    └── workshop/
-        ├── milling/
-        │   └── A1/
-        │       ├── analytics/
-        │       │   └── machine_failure
-        │       └── status/
-        │           └── machine_failure
-        ├── hydraulics/
-        │   └── A2/
-        │       ├── analytics/
-        │       │   ├── cooler_condition
-        │       │   └── valve_condition
-        │       └── condition/
-        │           ├── cooler_condition_pct
-        │           └── valve_condition_pct
-        └── fleet/
-            └── A3/
-                └── analytics/
-                    └── anomaly
+jesa/site1/
+├── workshop/
+│   ├── milling/A1/
+│   │   ├── process/   air_temperature_k · process_temperature_k
+│   │   ├── drive/     rotational_speed_rpm · torque_nm
+│   │   ├── tool/      tool_wear_min
+│   │   ├── analytics/ machine_failure · mode_twf · mode_hdf · mode_pwf · mode_osf · mode_rnf
+│   │   └── metrics/   prediction_count · failure_count
+│   └── hydraulics/A2/
+│       ├── hydraulic/ ps1_bar … ps6_bar · flow1_lpm · flow2_lpm
+│       ├── thermal/   ts1_c … ts4_c
+│       ├── motor/     power_w · vibration_mms
+│       ├── kpis/      cooling_efficiency_pct · cooling_power_kw · efficiency_factor_pct
+│       ├── analytics/ cooler_condition · valve_condition · pump_leakage · accumulator_pressure
+│       └── metrics/   cycle_count · degraded_cooler_count
+└── fleet/apu/A3/
+    ├── pneumatic/ tp2_bar · tp3_bar · h1_bar · dv_pressure_bar · reservoirs_bar
+    ├── oil/       temperature_c
+    ├── motor/     current_a
+    ├── digital/   comp
+    ├── analytics/ anomaly
+    └── metrics/   prediction_count · anomaly_count
 \`\`\`
 
 ## <a id="alerts">Alert Thresholds & Definitions</a>
@@ -1837,6 +1940,7 @@ function onMessageArrived(message) {
                 setAssetGlow('A3', COLORS.good);
                 a3Vibration = 0;
                 document.getElementById('a3-bar').style.background = 'linear-gradient(90deg, var(--a3-color), #a78bfa)';
+                _logEvent(`A3 — Normal (score: ${score})`, 'info');
             }
             // ── Viz ring buffer push ──
             _vizPush(vizData.A3.anomalyScore, payload.score != null ? +payload.score : 0);
@@ -1847,13 +1951,10 @@ function onMessageArrived(message) {
         if (currentPage === 'visualisation') _vizRefreshCharts();
 
         // Live-refresh analytics KPI strip on every message
-        if (currentPage === 'analytics') {
-            const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-            if (vizData.A1.failureProb.length)   setEl('an-kpi-a1',  vizData.A1.failureProb.at(-1).toFixed(1) + '%');
-            if (vizData.A2.cooler.length)         setEl('an-kpi-a2c', vizData.A2.cooler.at(-1).toFixed(0)      + '%');
-            if (vizData.A2.valve.length)          setEl('an-kpi-a2v', vizData.A2.valve.at(-1).toFixed(0)       + '%');
-            if (vizData.A3.anomalyScore.length)   setEl('an-kpi-a3',  vizData.A3.anomalyScore.at(-1).toFixed(3));
-        }
+        if (currentPage === 'analytics') _refreshAnalyticsDynamic();
+
+        // Live-refresh detail panel if open
+        if (_currentDetailAsset) refreshDetailPanel();
 
     } catch (e) {
         console.error('Parse error:', e);

@@ -121,6 +121,7 @@ class OpcuaPoller:
         self.poll_interval = poll_interval
         self._last_ok = 0.0
         self._tag_count = 0
+        self._last_tag_nodes: list[tuple[str, str, Any]] = []  # retained for stale publish
 
     @property
     def source_name(self) -> str:
@@ -148,6 +149,7 @@ class OpcuaPoller:
                             tag_nodes.append((folder_name, var_name, var_node))
 
                     self._tag_count = len(tag_nodes)
+                    self._last_tag_nodes = tag_nodes  # keep for stale publish on disconnect
                     log.info(
                         "%s: connected (%s), browsed %d tags",
                         self.source_name, self.source.url, self._tag_count,
@@ -177,10 +179,21 @@ class OpcuaPoller:
                 log.warning("%s: connection lost (%s), reconnecting in %ds",
                             self.source_name, exc, config.RECONNECT_BACKOFF_S)
 
-                # Publish stale quality for all known tags
+                # Publish stale quality for all known tags so subscribers
+                # can detect the data gap immediately (UNS spec §4).
                 if self._tag_count > 0 and self.publisher.connected:
-                    log.debug("%s: marking %d tags as stale",
-                              self.source_name, self._tag_count)
+                    log.info("%s: publishing stale quality for %d tags",
+                             self.source_name, self._tag_count)
+                    stale_payload = json.dumps({
+                        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                        "v": None,
+                        "q": "stale",
+                    })
+                    # We no longer have live node references, so we republish
+                    # on every topic that was last seen from this source.
+                    for folder, name, _ in (self._last_tag_nodes or []):
+                        topic = self.source.topic(folder, name)
+                        self.publisher._client.publish(topic, stale_payload, qos=0)
 
                 await asyncio.sleep(config.RECONNECT_BACKOFF_S)
 

@@ -1,8 +1,5 @@
 ﻿# JESA Digital Twin
 
-## 📄 Internship Project Report
-For a full evaluation of this project as an internship deliverable at JESA, including proposed enhancements, see [INTERNSHIP_PROJECT_REPORT.md](file:///c:\Users\MSI\Documents\jesa\INTERNSHIP_PROJECT_REPORT.md).
-
 ## Overview
 JESA Digital Twin is an Industry 4.0 predictive maintenance platform that simulates industrial assets, collects telemetry via OPC UA, runs ML models for anomaly/failure prediction, and provides a 3D interactive visualization of the factory floor!
 
@@ -125,18 +122,17 @@ jesa/
 - **Visualisation page** — real-time Chart.js plots for A1 failure probability, A2 cooler/valve condition, A3 anomaly score, and MQTT message rate; fed live by the MQTT pipeline
 
 ## Screenshots
-- **3D Digital Twin UI**: `c:\Users\MSI\AppData\Local\Temp\trae\screenshots\jesa-3d-digital-twin-final.png`
-- **Grafana Dashboards**: `c:\Users\MSI\AppData\Local\Temp\trae\screenshots\jesa-grafana-dashboards-final.png`
+> Screenshots are generated locally after running the full stack.
 
 ## Asset Info
-- **A1**: CNC Milling Machine – supervised failure classification (XGBoost)
-- **A2**: Hydraulic System – multi-target condition monitoring (XGBoost)
-- **A3**: APU Compressor – unsupervised anomaly detection (Isolation Forest + LSTM Autoencoder)
+- **A1**: CNC Milling Machine – supervised failure classification (XGBoost binary + 5 per-mode classifiers: TWF, HDF, PWF, OSF, RNF)
+- **A2**: Hydraulic System – multi-target condition monitoring (XGBoost × 4: cooler, valve, pump, accumulator)
+- **A3**: APU Compressor – unsupervised anomaly detection (Isolation Forest + LSTM Autoencoder ensemble)
 
 ## Tests
 Run unit tests:
 ```bash
 pytest -v tests/
 ```
-All tests should pass!
+20 tests covering A1, A2, and A3 predictors (initialization, inference, topic routing, metrics). All tests require model files — run the notebooks first to generate them.
 

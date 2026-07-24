@@ -24,24 +24,30 @@ MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MODEL_DIR = os.getenv("MODEL_DIR", "notebooks/models")
 
+# Per-mode failure labels
+A1_FAILURE_MODES = ["TWF", "HDF", "PWF", "OSF", "RNF"]
+
 try:
     import torch
     import torch.nn as nn
-    
+    _TORCH_AVAILABLE = True
+
     class LSTMAutoencoder(nn.Module):
-        def __init__(self, input_dim, hidden_dim=16):
+        def __init__(self, input_dim, hidden_dim=64):
             super().__init__()
             self.encoder = nn.LSTM(input_dim, hidden_dim, batch_first=True)
             self.decoder = nn.LSTM(hidden_dim, input_dim, batch_first=True)
-            
+
         def forward(self, x):
             _, (hidden, _) = self.encoder(x)
             seq_len = x.shape[1]
             hidden_rep = hidden[-1].unsqueeze(1).repeat(1, seq_len, 1)
             out, _ = self.decoder(hidden_rep)
             return out
+
 except ImportError:
-    log.warning("PyTorch not installed. A3 Autoencoder will not work.")
+    _TORCH_AVAILABLE = False
+    log.warning("PyTorch not installed. A3 LSTM Autoencoder will be disabled.")
 
 
 # ==============================================================================
@@ -55,7 +61,9 @@ class A1Predictor:
         self.type_encoder = None
         self.feature_columns = None
         self.model_mtime = 0
-        self.load_model()
+
+        # Per-mode classifiers: {mode: {"model": ..., "threshold": float}}
+        self.mode_models: dict[str, dict] = {}
 
         self.state = {
             "Type": "L",
@@ -63,143 +71,195 @@ class A1Predictor:
             "ProcTemp_K": 308.15,
             "Speed_rpm": 1400.0,
             "Torque_Nm": 40.0,
-            "ToolWear_min": 0.0
+            "ToolWear_min": 0.0,
         }
         self.last_predict = 0.0
-        
-        # Metrics tracking
+
+        # Metrics
         self.prediction_count = 0
         self.failure_count = 0
+
+        self.load_model()
 
     def load_model(self):
         if not os.path.exists(self.model_path):
             return
         current_mtime = os.path.getmtime(self.model_path)
-        if current_mtime > self.model_mtime:
-            log.info(f"Loading/Reloading A1 model from {self.model_path}")
+        if current_mtime <= self.model_mtime:
+            return  # nothing changed — avoid stat on every predict
+        log.info("Loading/Reloading A1 binary model from %s", self.model_path)
+        try:
+            bundle = joblib.load(self.model_path)
+            self.model = bundle["model"]
+            self.scaler = bundle["scaler"]
+            self.type_encoder = bundle["type_encoder"]
+            self.feature_columns = bundle["feature_columns"]
+            self.model_mtime = current_mtime
+            log.info("A1 binary model loaded.")
+        except Exception as e:
+            log.error("Failed to load A1 binary model: %s", e)
+            return
+
+        # Load per-mode classifiers (TWF, HDF, PWF, OSF, RNF)
+        self.mode_models = {}
+        for mode in A1_FAILURE_MODES:
+            path = f"{MODEL_DIR}/a1_{mode.lower()}_classifier.joblib"
+            if not os.path.exists(path):
+                log.warning("Per-mode model not found: %s — skipping %s", path, mode)
+                continue
             try:
-                bundle = joblib.load(self.model_path)
-                self.model = bundle["model"]
-                self.scaler = bundle["scaler"]
-                self.type_encoder = bundle["type_encoder"]
-                self.feature_columns = bundle["feature_columns"]
-                self.model_mtime = current_mtime
-                log.info("A1 Model hot-reloaded successfully.")
+                bundle = joblib.load(path)
+                self.mode_models[mode] = {
+                    "model": bundle["model"],
+                    "threshold": bundle["threshold"],
+                }
+                log.info("A1 per-mode model loaded: %s (t=%.2f)", mode, bundle["threshold"])
             except Exception as e:
-                log.error(f"Failed to load A1 model: {e}")
+                log.error("Failed to load A1 %s model: %s", mode, e)
 
     def update(self, topic, value):
-        topic_suffix = topic.split("A1/")[-1]
-        if topic_suffix == "part/product_type":
+        suffix = topic.split("A1/")[-1]
+        if suffix == "part/product_type":
             self.state["Type"] = value
-        elif topic_suffix == "process/air_temperature_k":
+        elif suffix == "process/air_temperature_k":
             self.state["AirTemp_K"] = float(value)
-        elif topic_suffix == "process/process_temperature_k":
+        elif suffix == "process/process_temperature_k":
             self.state["ProcTemp_K"] = float(value)
-        elif topic_suffix == "drive/rotational_speed_rpm":
+        elif suffix == "drive/rotational_speed_rpm":
             self.state["Speed_rpm"] = float(value)
-        elif topic_suffix == "drive/torque_nm":
+        elif suffix == "drive/torque_nm":
             self.state["Torque_Nm"] = float(value)
-        elif topic_suffix == "tool/tool_wear_min":
+        elif suffix == "tool/tool_wear_min":
             self.state["ToolWear_min"] = float(value)
-            
+
         now = time.time()
         if now - self.last_predict >= 1.0:
             self.last_predict = now
             return self.predict()
         return None
 
+    def _build_feature_row(self):
+        """Build scaled feature array from current state."""
+        power_w = self.state["Torque_Nm"] * self.state["Speed_rpm"] * 2 * np.pi / 60
+        delta_t = self.state["ProcTemp_K"] - self.state["AirTemp_K"]
+        wear_torque = self.state["ToolWear_min"] * self.state["Torque_Nm"]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            type_enc = float(self.type_encoder.transform([[self.state["Type"]]])[0][0])
+
+        features = {
+            "AirTemp_K":    self.state["AirTemp_K"],
+            "ProcTemp_K":   self.state["ProcTemp_K"],
+            "Speed_rpm":    self.state["Speed_rpm"],
+            "Torque_Nm":    self.state["Torque_Nm"],
+            "ToolWear_min": self.state["ToolWear_min"],
+            "Power_W":      power_w,
+            "DeltaT_K":     delta_t,
+            "WearTorque":   wear_torque,
+            "Type_enc":     type_enc,
+        }
+        x_df = pd.DataFrame([features], columns=self.feature_columns)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            x_scaled = self.scaler.transform(x_df)
+        return x_scaled
+
     def predict(self):
+        # Reload if model file changed on disk (hot-reload support)
         self.load_model()
         if not self.model:
             return None
-        
-        power_w = self.state["Torque_Nm"] * self.state["Speed_rpm"] * 2 * np.pi / 60
-        delta_t_k = self.state["ProcTemp_K"] - self.state["AirTemp_K"]
-        wear_torque = self.state["ToolWear_min"] * self.state["Torque_Nm"]
-        
+
+        x_scaled = self._build_feature_row()
+
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="X does not have valid feature names")
-            type_enc = self.type_encoder.transform([[self.state["Type"]]])[0][0]
-            
-            # Use DataFrame with correct feature names (from model bundle)
-            features = {
-                "AirTemp_K": self.state["AirTemp_K"],
-                "ProcTemp_K": self.state["ProcTemp_K"],
-                "Speed_rpm": self.state["Speed_rpm"],
-                "Torque_Nm": self.state["Torque_Nm"],
-                "ToolWear_min": self.state["ToolWear_min"],
-                "Power_W": power_w,
-                "DeltaT_K": delta_t_k,
-                "WearTorque": wear_torque,
-                "Type_enc": type_enc
-            }
-            
-            x_df = pd.DataFrame([features], columns=self.feature_columns)
-            
-            warnings.filterwarnings("ignore", message="X does not have valid feature names")
-            warnings.filterwarnings("ignore", message="X has feature names")
-            x_scaled = self.scaler.transform(x_df)
-            pred = self.model.predict(x_scaled)[0]
-            prob = self.model.predict_proba(x_scaled)[0][1]
-            
-        # Update metrics
+            warnings.simplefilter("ignore")
+            pred = int(self.model.predict(x_scaled)[0])
+            prob = float(self.model.predict_proba(x_scaled)[0][1])
+
+        # Per-mode inference
+        mode_predictions: dict[str, int] = {}
+        mode_probabilities: dict[str, float] = {}
+        for mode, bundle in self.mode_models.items():
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    mode_prob = float(bundle["model"].predict_proba(x_scaled)[0][1])
+                mode_pred = int(mode_prob >= bundle["threshold"])
+                mode_predictions[mode] = mode_pred
+                mode_probabilities[mode] = mode_prob
+            except Exception as e:
+                log.error("Per-mode inference failed for %s: %s", mode, e)
+
         self.prediction_count += 1
         if pred == 1:
             self.failure_count += 1
-        
+
         return {
-            "machine_failure": int(pred),
-            "failure_probability": float(prob),
+            "machine_failure": pred,
+            "failure_probability": prob,
+            "mode_predictions": mode_predictions,
+            "mode_probabilities": mode_probabilities,
             "metrics": {
                 "prediction_count": self.prediction_count,
-                "failure_count": self.failure_count
-            }
+                "failure_count": self.failure_count,
+            },
         }
+
 
 # ==============================================================================
 # A2 PREDICTOR (Hydraulic Test Rig - Condition Monitoring)
 # ==============================================================================
 class A2Predictor:
     def __init__(self):
-        self.sensors = ['PS1', 'PS2', 'PS3', 'PS4', 'PS5', 'PS6', 'EPS1', 'FS1', 'FS2', 'TS1', 'TS2', 'TS3', 'TS4', 'VS1', 'CE', 'CP', 'SE']
+        self.sensors = [
+            'PS1', 'PS2', 'PS3', 'PS4', 'PS5', 'PS6',
+            'EPS1', 'FS1', 'FS2',
+            'TS1', 'TS2', 'TS3', 'TS4',
+            'VS1', 'CE', 'CP', 'SE',
+        ]
         self.state = {s: [] for s in self.sensors}
-        self.cycle_features = collections.deque(maxlen=10) # Keep last 10 cycles
+        self.cycle_features: collections.deque = collections.deque(maxlen=10)
         self.models_loaded = False
-        self.load_models()
         self.last_cycle_index = -1
-        
-        # Metrics tracking
+
+        # Metrics
         self.cycle_count = 0
         self.degraded_cooler_count = 0
+
+        self.load_models()
 
     def load_models(self):
         try:
             cfg = joblib.load(f"{MODEL_DIR}/a2_shared_config.joblib")
             self.scaler = cfg['scaler']
             self.feature_columns = cfg['feature_columns']
-            
-            self.model_cooler = joblib.load(f"{MODEL_DIR}/a2_cooler_classifier.joblib")['model']
-            self.model_valve = joblib.load(f"{MODEL_DIR}/a2_valve_classifier.joblib")['model']
-            self.model_pumpleak = joblib.load(f"{MODEL_DIR}/a2_pumpleak_classifier.joblib")['model']
+            self.model_cooler      = joblib.load(f"{MODEL_DIR}/a2_cooler_classifier.joblib")['model']
+            self.model_valve       = joblib.load(f"{MODEL_DIR}/a2_valve_classifier.joblib")['model']
+            self.model_pumpleak    = joblib.load(f"{MODEL_DIR}/a2_pumpleak_classifier.joblib")['model']
             self.model_accumulator = joblib.load(f"{MODEL_DIR}/a2_accumulator_classifier.joblib")['model']
             self.models_loaded = True
-            log.info("A2 Models loaded successfully.")
+            log.info("A2 models loaded successfully.")
         except Exception as e:
-            log.error(f"Failed to load A2 models: {e}")
+            log.error("Failed to load A2 models: %s", e)
             self.models_loaded = False
 
     def map_topic_to_sensor(self, topic):
         mapping = {
-            "hydraulic/ps1_bar": "PS1", "hydraulic/ps2_bar": "PS2", "hydraulic/ps3_bar": "PS3",
-            "hydraulic/ps4_bar": "PS4", "hydraulic/ps5_bar": "PS5", "hydraulic/ps6_bar": "PS6",
-            "motor/power_w": "EPS1", "hydraulic/flow1_lpm": "FS1", "hydraulic/flow2_lpm": "FS2",
-            "thermal/ts1_c": "TS1", "thermal/ts2_c": "TS2", "thermal/ts3_c": "TS3", "thermal/ts4_c": "TS4",
-            "motor/vibration_mms": "VS1", "kpis/cooling_efficiency_pct": "CE", "kpis/cooling_power_kw": "CP",
-            "kpis/efficiency_factor_pct": "SE"
+            "hydraulic/ps1_bar": "PS1", "hydraulic/ps2_bar": "PS2",
+            "hydraulic/ps3_bar": "PS3", "hydraulic/ps4_bar": "PS4",
+            "hydraulic/ps5_bar": "PS5", "hydraulic/ps6_bar": "PS6",
+            "motor/power_w": "EPS1",
+            "hydraulic/flow1_lpm": "FS1", "hydraulic/flow2_lpm": "FS2",
+            "thermal/ts1_c": "TS1", "thermal/ts2_c": "TS2",
+            "thermal/ts3_c": "TS3", "thermal/ts4_c": "TS4",
+            "motor/vibration_mms": "VS1",
+            "kpis/cooling_efficiency_pct": "CE",
+            "kpis/cooling_power_kw": "CP",
+            "kpis/efficiency_factor_pct": "SE",
         }
-        suffix = topic.split("A2/")[-1]
-        return mapping.get(suffix)
+        return mapping.get(topic.split("A2/")[-1])
 
     def update(self, topic, value):
         suffix = topic.split("A2/")[-1]
@@ -211,7 +271,7 @@ class A2Predictor:
                 return res
             self.last_cycle_index = cycle_index
             return None
-        
+
         sensor = self.map_topic_to_sensor(topic)
         if sensor:
             self.state[sensor].append(float(value))
@@ -220,318 +280,370 @@ class A2Predictor:
     def process_cycle(self):
         if not self.models_loaded:
             return None
-            
-        # Compute stats for current cycle
-        cycle_stats = {}
+
+        # Compute per-sensor statistics for this cycle
+        cycle_stats: dict[str, float] = {}
         for s in self.sensors:
-            arr = np.array(self.state[s]) if len(self.state[s]) > 0 else np.array([0.0])
-            cycle_stats[f"{s}_mean"] = float(np.mean(arr))
-            cycle_stats[f"{s}_std"] = float(np.std(arr))
-            cycle_stats[f"{s}_min"] = float(np.min(arr))
-            cycle_stats[f"{s}_max"] = float(np.max(arr))
-            skew_val = pd.Series(arr).skew() if len(arr) > 2 else 0.0
-            cycle_stats[f"{s}_skew"] = float(skew_val) if not pd.isna(skew_val) else 0.0
-            kurt_val = pd.Series(arr).kurtosis() if len(arr) > 3 else 0.0
-            cycle_stats[f"{s}_kurtosis"] = float(kurt_val) if not pd.isna(kurt_val) else 0.0
-        
-        # Clear buffer for next cycle
+            arr = np.array(self.state[s]) if self.state[s] else np.array([0.0])
+            cycle_stats[f"{s}_mean"]     = float(np.mean(arr))
+            cycle_stats[f"{s}_std"]      = float(np.std(arr))
+            cycle_stats[f"{s}_min"]      = float(np.min(arr))
+            cycle_stats[f"{s}_max"]      = float(np.max(arr))
+            skew = pd.Series(arr).skew()     if len(arr) > 2 else 0.0
+            kurt = pd.Series(arr).kurtosis() if len(arr) > 3 else 0.0
+            cycle_stats[f"{s}_skew"]     = float(skew) if not pd.isna(skew) else 0.0
+            cycle_stats[f"{s}_kurtosis"] = float(kurt) if not pd.isna(kurt) else 0.0
+
+        # Clear buffers for next cycle
         for s in self.sensors:
             self.state[s] = []
-            
-        # Add to deque
+
         self.cycle_features.append(cycle_stats)
-        
-        # If we don't have enough history, return None
-        if len(self.cycle_features) < 1:
-            return None
-            
-        # Build full feature vector
-        row = {}
+
+        # Build full feature vector with rolling windows
+        row: dict[str, float] = {}
         row.update(cycle_stats)
-        
-        # Rolling 5 and 10 features
         for window in [5, 10]:
             hist = list(self.cycle_features)[-window:]
             for s in self.sensors:
                 for stat in ["mean", "std", "min", "max", "skew", "kurtosis"]:
                     col = f"{s}_{stat}"
-                    vals = [h[col] for h in hist if not pd.isna(h[col])]
+                    vals = [h[col] for h in hist if not pd.isna(h.get(col, float('nan')))]
                     row[f"{col}_roll{window}"] = float(np.mean(vals)) if vals else 0.0
-        
-        # Fill NaN and ensure native float
+
+        # Sanitize
         for k in row:
-            v = row[k]
-            if pd.isna(v):
+            if pd.isna(row[k]):
                 row[k] = 0.0
-            else:
-                row[k] = float(v)
-            
-        # Predict using numpy array directly (avoids pandas 3.x issues)
+
         x = np.array([[row.get(c, 0.0) for c in self.feature_columns]])
         x_scaled = self.scaler.transform(x)
-        
-        # Update metrics
-        self.cycle_count += 1
+
         cooler_pred = int(self.model_cooler.predict(x_scaled)[0])
+        self.cycle_count += 1
         if cooler_pred < 100:
             self.degraded_cooler_count += 1
-        
+
         return {
-            "cooler": cooler_pred,
-            "valve": int(self.model_valve.predict(x_scaled)[0]),
-            "pump_leak": int(self.model_pumpleak.predict(x_scaled)[0]),
+            "cooler":      cooler_pred,
+            "valve":       int(self.model_valve.predict(x_scaled)[0]),
+            "pump_leak":   int(self.model_pumpleak.predict(x_scaled)[0]),
             "accumulator": int(self.model_accumulator.predict(x_scaled)[0]),
             "metrics": {
-                "cycle_count": self.cycle_count,
-                "degraded_cooler_count": self.degraded_cooler_count
-            }
+                "cycle_count":           self.cycle_count,
+                "degraded_cooler_count": self.degraded_cooler_count,
+            },
         }
+
 
 # ==============================================================================
 # A3 PREDICTOR (APU Compressor - Anomaly Detection)
 # ==============================================================================
 class A3Predictor:
+    # Sequence length the autoencoder was trained on
+    AE_SEQ_LEN = 10
+
     def __init__(self):
-        self.raw_cols = ["TP2", "TP3", "H1", "DV_pressure", "Reservoirs", "Oil_temperature", "Motor_current", "COMP"]
-        self.history = collections.deque(maxlen=1800) # Keep 30 mins at 1Hz
+        self.raw_cols = [
+            "TP2", "TP3", "H1", "DV_pressure",
+            "Reservoirs", "Oil_temperature", "Motor_current", "COMP",
+        ]
+        # Rolling history of raw rows (30 min @ 1 Hz)
+        self.history: collections.deque = collections.deque(maxlen=1800)
+        # Rolling history of scaled feature vectors for autoencoder sequence
+        self.scaled_history: collections.deque = collections.deque(maxlen=self.AE_SEQ_LEN)
+
+        self.current_row: dict = {}
+        self.current_ts: int = 0
         self.last_predict = 0.0
         self.models_loaded = False
-        self.load_models()
-        
-        # Metrics tracking
+
+        # Metrics
         self.prediction_count = 0
         self.anomaly_count = 0
+
+        self.load_models()
 
     def load_models(self):
         try:
             cfg = joblib.load(f"{MODEL_DIR}/a3_ensemble_config.joblib")
             self.threshold = cfg['best_threshold_value']
-            
+
             if_bundle = joblib.load(f"{MODEL_DIR}/a3_isolation_forest.joblib")
-            self.if_model = if_bundle['model']
-            self.scaler = if_bundle['scaler']
+            self.if_model        = if_bundle['model']
+            self.scaler          = if_bundle['scaler']
             self.feature_columns = if_bundle['feature_columns']
-            
-            self.device = torch.device("cpu")
-            self.autoencoder = LSTMAutoencoder(input_dim=32, hidden_dim=64).to(self.device)
-            ae_bundle = torch.load(f"{MODEL_DIR}/a3_autoencoder.pth", map_location=self.device, weights_only=False)
-            self.autoencoder.load_state_dict(ae_bundle["model_state_dict"])
-            self.autoencoder.eval()
-            
+
+            if _TORCH_AVAILABLE:
+                self.device = torch.device("cpu")
+                self.autoencoder = LSTMAutoencoder(
+                    input_dim=len(self.feature_columns), hidden_dim=64
+                ).to(self.device)
+                ae_bundle = torch.load(
+                    f"{MODEL_DIR}/a3_autoencoder.pth",
+                    map_location=self.device,
+                    weights_only=True,   # safe load
+                )
+                self.autoencoder.load_state_dict(ae_bundle["model_state_dict"])
+                self.autoencoder.eval()
+                log.info("A3 LSTM autoencoder loaded.")
+            else:
+                self.autoencoder = None
+
             self.models_loaded = True
-            log.info("A3 Models loaded successfully.")
+            log.info("A3 models loaded (threshold=%.4f).", self.threshold)
         except Exception as e:
-            log.error(f"Failed to load A3 models: {e}")
+            log.error("Failed to load A3 models: %s", e)
             self.models_loaded = False
 
     def update(self, topic, value):
-        # We need to construct rows of the 8 basic signals every second
-        # Because we receive them separately, we aggregate them by a rounded timestamp
         now = int(time.time())
-        if not hasattr(self, 'current_row') or self.current_row.get('ts') != now:
-            if hasattr(self, 'current_row'):
-                # push previous row to history, filling missing with previous values if possible
-                row_data = {c: self.current_row.get(c, self.history[-1][c] if self.history else 0.0) for c in self.raw_cols}
+
+        # New second — flush previous row to history
+        if now != self.current_ts:
+            if self.current_ts != 0 and self.current_row:
+                prev = self.history[-1] if self.history else {}
+                row_data = {
+                    c: self.current_row.get(c, prev.get(c, 0.0))
+                    for c in self.raw_cols
+                }
                 self.history.append(row_data)
-                log.info(f"A3 pushed row to history (new ts={now}), len(history)={len(self.history)}")
-            self.current_row = {'ts': now}
-            
-        suffix = topic.split("A3/")[-1]
-        log.info(f"A3 update: topic={topic}, suffix={suffix}")
+            self.current_row = {}
+            self.current_ts = now
+
         mapping = {
-            "pneumatic/tp2_bar": "TP2", "pneumatic/tp3_bar": "TP3", "pneumatic/h1_bar": "H1",
-            "pneumatic/dv_pressure_bar": "DV_pressure", "pneumatic/reservoirs_bar": "Reservoirs",
-            "oil/temperature_c": "Oil_temperature", "motor/current_a": "Motor_current",
-            "digital/comp": "COMP"
+            "pneumatic/tp2_bar":       "TP2",
+            "pneumatic/tp3_bar":       "TP3",
+            "pneumatic/h1_bar":        "H1",
+            "pneumatic/dv_pressure_bar": "DV_pressure",
+            "pneumatic/reservoirs_bar": "Reservoirs",
+            "oil/temperature_c":       "Oil_temperature",
+            "motor/current_a":         "Motor_current",
+            "digital/comp":            "COMP",
         }
-        col = mapping.get(suffix)
+        col = mapping.get(topic.split("A3/")[-1])
         if col:
             self.current_row[col] = float(value)
-            log.info(f"A3 added {col} = {value} to current_row, now len={len(self.current_row)}")
-            
-        # Predict every 10 seconds if we have enough history (reduced to 60s for demo purposes)
-        current_time = time.time()
-        time_since_last_predict = current_time - self.last_predict
-        log.info(f"A3 time check: current={current_time}, last_predict={self.last_predict}, delta={time_since_last_predict}")
-        if time_since_last_predict >= 10.0:
-            self.last_predict = current_time
-            log.info(f"A3 debug: len(history)={len(self.history)}, current_row={len(self.current_row)}")
-            if len(self.history) >= 10:
-                res = self.predict()
-                log.info(f"A3 prediction result: {res}")
-                return res
+
+        # Predict every 10 s once we have enough history
+        if time.time() - self.last_predict >= 10.0 and len(self.history) >= self.AE_SEQ_LEN:
+            self.last_predict = time.time()
+            return self.predict()
         return None
 
     def predict(self):
         if not self.models_loaded:
             return None
-            
+
         df = pd.DataFrame(list(self.history))
-        row = {}
-        # compute roll5 (300s) and roll30 (1800s) for continuous
+
+        # Build feature row (rolling stats)
+        row: dict[str, float] = {}
         for c in ["TP2", "TP3", "H1", "DV_pressure", "Reservoirs", "Oil_temperature", "Motor_current"]:
-            row[f"{c}_roll5_mean"] = df[c].tail(300).mean()
-            row[f"{c}_roll5_std"] = df[c].tail(300).std()
-            row[f"{c}_roll30_mean"] = df[c].mean()
-            row[f"{c}_roll30_std"] = df[c].std()
-            
-        row["COMP_duty_5min"] = df["COMP"].tail(300).mean()
-        row["COMP_duty_30min"] = df["COMP"].mean()
-        row["TP3_Reservoirs_diff"] = df["TP3"].iloc[-1] - df["Reservoirs"].iloc[-1]
-        row["TP3_TP2_diff"] = df["TP3"].iloc[-1] - df["TP2"].iloc[-1]
-        
-        for k, v in row.items():
-            if pd.isna(v): row[k] = 0.0
-            
+            row[f"{c}_roll5_mean"]  = float(df[c].tail(300).mean())
+            row[f"{c}_roll5_std"]   = float(df[c].tail(300).std())
+            row[f"{c}_roll30_mean"] = float(df[c].mean())
+            row[f"{c}_roll30_std"]  = float(df[c].std())
+        row["COMP_duty_5min"]       = float(df["COMP"].tail(300).mean())
+        row["COMP_duty_30min"]      = float(df["COMP"].mean())
+        row["TP3_Reservoirs_diff"]  = float(df["TP3"].iloc[-1] - df["Reservoirs"].iloc[-1])
+        row["TP3_TP2_diff"]         = float(df["TP3"].iloc[-1] - df["TP2"].iloc[-1])
+
+        for k in row:
+            if pd.isna(row[k]):
+                row[k] = 0.0
+
         df_x = pd.DataFrame([row], columns=self.feature_columns)
-        x_scaled = self.scaler.transform(df_x)
-        
-        # Isolation Forest
-        if_score = -self.if_model.score_samples(x_scaled)[0]
-        
-        # Autoencoder
-        # Needs a sequence of 10 samples. We only have 1 sample in df_x right now.
-        # But wait, the Autoencoder was trained on X_seq (which is rolling windows of 10 scaled features)
-        # To do it properly in real-time, we'd need 10 recent x_scaled. 
-        # For simplicity in this demo inference, we can duplicate the single sample to length 10
-        # since it already contains rolling means.
-        seq = np.tile(x_scaled, (10, 1))
-        with torch.no_grad():
-            tensor_seq = torch.FloatTensor(seq).unsqueeze(0).to(self.device)
-            out = self.autoencoder(tensor_seq).numpy()[0]
-            ae_score = np.mean((seq - out)**2)
-            
-        # Ensemble mean
-        # Since we didn't normalize ae_score exactly like the notebook, IF score dominates
-        # which is fine for the demo
-        ensemble_score = float((if_score + ae_score) / 2)
-        
-        # Update metrics
+        x_scaled = self.scaler.transform(df_x)  # shape (1, n_features)
+
+        # Isolation Forest score
+        if_score = float(-self.if_model.score_samples(x_scaled)[0])
+
+        # Push to rolling deque for autoencoder sequence
+        self.scaled_history.append(x_scaled[0])
+
+        # Autoencoder score — only when we have a real sequence
+        ae_score = 0.0
+        if self.autoencoder is not None and len(self.scaled_history) == self.AE_SEQ_LEN:
+            seq = np.array(list(self.scaled_history))  # (AE_SEQ_LEN, n_features)
+            with torch.no_grad():
+                tensor_seq = torch.FloatTensor(seq).unsqueeze(0).to(self.device)
+                out = self.autoencoder(tensor_seq).cpu().numpy()[0]
+                ae_score = float(np.mean((seq - out) ** 2))
+
+        ensemble_score = (if_score + ae_score) / 2 if ae_score > 0 else if_score
+
         self.prediction_count += 1
         is_anomaly = int(ensemble_score > self.threshold)
         if is_anomaly:
             self.anomaly_count += 1
-        
+
         return {
             "anomaly_score": ensemble_score,
-            "is_anomaly": is_anomaly,
+            "is_anomaly":    is_anomaly,
             "metrics": {
                 "prediction_count": self.prediction_count,
-                "anomaly_count": self.anomaly_count
-            }
+                "anomaly_count":    self.anomaly_count,
+            },
         }
+
 
 # ==============================================================================
 # MQTT callbacks
 # ==============================================================================
 def on_connect(client, userdata, flags, rc, properties=None):
-    log.info(f"Connected to MQTT Broker at {MQTT_HOST}:{MQTT_PORT} with code {rc}")
-    client.subscribe("jesa/site1/workshop/milling/A1/#")
-    client.subscribe("jesa/site1/workshop/hydraulics/A2/#")
-    client.subscribe("jesa/site1/fleet/apu/A3/#")
+    if rc == 0:
+        log.info("Connected to MQTT broker at %s:%d", MQTT_HOST, MQTT_PORT)
+        client.subscribe("jesa/site1/workshop/milling/A1/#")
+        client.subscribe("jesa/site1/workshop/hydraulics/A2/#")
+        client.subscribe("jesa/site1/fleet/apu/A3/#")
+    else:
+        log.error("MQTT connect failed with code %d", rc)
+
+
+def on_disconnect(client, userdata, flags, rc, properties=None):
+    if rc != 0:
+        log.warning("Unexpected MQTT disconnect (rc=%d) — paho will auto-reconnect.", rc)
+
 
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
         value = payload.get("v")
-        if value is None: return
-        
-        # Route to A1
+        if value is None:
+            return
+
+        ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+        # ── A1 ───────────────────────────────────────────────────────
         if "/A1/" in msg.topic:
             res = userdata["a1"].update(msg.topic, value)
-            if res is not None:
-                ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-                client.publish("jesa/site1/workshop/milling/A1/analytics/machine_failure", json.dumps({
-                    "ts": ts,
-                    "v": res["machine_failure"],
-                    "q": "good",
-                    "probability": res["failure_probability"]
-                }), qos=0)
-                # Publish metrics
-                client.publish("jesa/site1/workshop/milling/A1/metrics/prediction_count", json.dumps({
-                    "ts": ts,
-                    "v": res["metrics"]["prediction_count"],
-                    "q": "good"
-                }), qos=0)
-                client.publish("jesa/site1/workshop/milling/A1/metrics/failure_count", json.dumps({
-                    "ts": ts,
-                    "v": res["metrics"]["failure_count"],
-                    "q": "good"
-                }), qos=0)
-                
-        # Route to A2
+            if res is None:
+                return
+
+            # Binary failure prediction
+            client.publish(
+                "jesa/site1/workshop/milling/A1/analytics/machine_failure",
+                json.dumps({
+                    "ts": ts, "v": res["machine_failure"], "q": "good",
+                    "probability": res["failure_probability"],
+                }),
+                qos=0,
+            )
+
+            # Per-mode predictions
+            for mode, mode_pred in res["mode_predictions"].items():
+                client.publish(
+                    f"jesa/site1/workshop/milling/A1/analytics/mode_{mode.lower()}",
+                    json.dumps({
+                        "ts": ts,
+                        "v": mode_pred,
+                        "q": "good",
+                        "probability": res["mode_probabilities"].get(mode, 0.0),
+                    }),
+                    qos=0,
+                )
+
+            # Metrics
+            client.publish(
+                "jesa/site1/workshop/milling/A1/metrics/prediction_count",
+                json.dumps({"ts": ts, "v": res["metrics"]["prediction_count"], "q": "good"}),
+                qos=0,
+            )
+            client.publish(
+                "jesa/site1/workshop/milling/A1/metrics/failure_count",
+                json.dumps({"ts": ts, "v": res["metrics"]["failure_count"], "q": "good"}),
+                qos=0,
+            )
+
+        # ── A2 ───────────────────────────────────────────────────────
         elif "/A2/" in msg.topic:
             res = userdata["a2"].update(msg.topic, value)
-            if res is not None:
-                ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-                client.publish("jesa/site1/workshop/hydraulics/A2/analytics/cooler_condition", json.dumps({"ts": ts, "v": res["cooler"], "q": "good"}), qos=0)
-                client.publish("jesa/site1/workshop/hydraulics/A2/analytics/valve_condition", json.dumps({"ts": ts, "v": res["valve"], "q": "good"}), qos=0)
-                client.publish("jesa/site1/workshop/hydraulics/A2/analytics/pump_leakage", json.dumps({"ts": ts, "v": res["pump_leak"], "q": "good"}), qos=0)
-                client.publish("jesa/site1/workshop/hydraulics/A2/analytics/accumulator_pressure", json.dumps({"ts": ts, "v": res["accumulator"], "q": "good"}), qos=0)
-                # Publish metrics
-                client.publish("jesa/site1/workshop/hydraulics/A2/metrics/cycle_count", json.dumps({
-                    "ts": ts,
-                    "v": res["metrics"]["cycle_count"],
-                    "q": "good"
-                }), qos=0)
-                client.publish("jesa/site1/workshop/hydraulics/A2/metrics/degraded_cooler_count", json.dumps({
-                    "ts": ts,
-                    "v": res["metrics"]["degraded_cooler_count"],
-                    "q": "good"
-                }), qos=0)
+            if res is None:
+                return
 
-        # Route to A3
+            for key, topic_suffix in [
+                ("cooler",      "cooler_condition"),
+                ("valve",       "valve_condition"),
+                ("pump_leak",   "pump_leakage"),
+                ("accumulator", "accumulator_pressure"),
+            ]:
+                client.publish(
+                    f"jesa/site1/workshop/hydraulics/A2/analytics/{topic_suffix}",
+                    json.dumps({"ts": ts, "v": res[key], "q": "good"}),
+                    qos=0,
+                )
+
+            client.publish(
+                "jesa/site1/workshop/hydraulics/A2/metrics/cycle_count",
+                json.dumps({"ts": ts, "v": res["metrics"]["cycle_count"], "q": "good"}),
+                qos=0,
+            )
+            client.publish(
+                "jesa/site1/workshop/hydraulics/A2/metrics/degraded_cooler_count",
+                json.dumps({"ts": ts, "v": res["metrics"]["degraded_cooler_count"], "q": "good"}),
+                qos=0,
+            )
+
+        # ── A3 ───────────────────────────────────────────────────────
         elif "/A3/" in msg.topic:
             res = userdata["a3"].update(msg.topic, value)
-            if res is not None:
-                ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-                client.publish("jesa/site1/fleet/apu/A3/analytics/anomaly", json.dumps({
-                    "ts": ts,
-                    "v": res["is_anomaly"],
-                    "q": "good",
-                    "score": res["anomaly_score"]
-                }), qos=0)
-                # Publish metrics
-                client.publish("jesa/site1/fleet/apu/A3/metrics/prediction_count", json.dumps({
-                    "ts": ts,
-                    "v": res["metrics"]["prediction_count"],
-                    "q": "good"
-                }), qos=0)
-                client.publish("jesa/site1/fleet/apu/A3/metrics/anomaly_count", json.dumps({
-                    "ts": ts,
-                    "v": res["metrics"]["anomaly_count"],
-                    "q": "good"
-                }), qos=0)
-                
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+            if res is None:
+                return
+
+            client.publish(
+                "jesa/site1/fleet/apu/A3/analytics/anomaly",
+                json.dumps({
+                    "ts": ts, "v": res["is_anomaly"], "q": "good",
+                    "score": res["anomaly_score"],
+                }),
+                qos=0,
+            )
+            client.publish(
+                "jesa/site1/fleet/apu/A3/metrics/prediction_count",
+                json.dumps({"ts": ts, "v": res["metrics"]["prediction_count"], "q": "good"}),
+                qos=0,
+            )
+            client.publish(
+                "jesa/site1/fleet/apu/A3/metrics/anomaly_count",
+                json.dumps({"ts": ts, "v": res["metrics"]["anomaly_count"], "q": "good"}),
+                qos=0,
+            )
+
+    except Exception:
+        log.exception("Error processing message on topic %s", msg.topic)
+
 
 def main():
     log.info("Starting ML Inference Service (A1, A2, A3)")
-    a1_predictor = A1Predictor()
-    a2_predictor = A2Predictor()
-    a3_predictor = A3Predictor()
-    
+    a1 = A1Predictor()
+    a2 = A2Predictor()
+    a3 = A3Predictor()
+
     client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id="ml-inference-service",
         protocol=mqtt.MQTTv5,
-        userdata={"a1": a1_predictor, "a2": a2_predictor, "a3": a3_predictor}
+        userdata={"a1": a1, "a2": a2, "a3": a3},
     )
-    
-    client.on_connect = on_connect
-    client.on_message = on_message
-    
+    client.on_connect    = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message    = on_message
+
+    # Enable paho auto-reconnect
+    client.reconnect_delay_set(min_delay=1, max_delay=30)
+
+    # Initial connection with retry
     while True:
         try:
-            client.connect(MQTT_HOST, MQTT_PORT, 60)
+            client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
             break
-        except ConnectionRefusedError:
-            log.warning(f"Waiting for MQTT Broker at {MQTT_HOST}:{MQTT_PORT}...")
+        except (ConnectionRefusedError, OSError):
+            log.warning("Waiting for MQTT broker at %s:%d ...", MQTT_HOST, MQTT_PORT)
             time.sleep(5)
-            
+
     client.loop_forever()
+
 
 if __name__ == "__main__":
     main()

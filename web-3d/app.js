@@ -9,6 +9,54 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 // ================================================================
 let currentPage = 'live';
 
+// =====================================================================
+//  VISUALISATION — Ring buffers (50 pts) fed by onMessageArrived
+// =====================================================================
+const VIZ_MAX = 50; // max data-points kept per series
+
+const vizData = {
+    A1: {
+        failureProb: [],   // 0-100 %
+        timestamps:  [],
+    },
+    A2: {
+        cooler:     [],    // 0-100 %
+        valve:      [],    // 0-100 %
+        timestamps: [],
+    },
+    A3: {
+        anomalyScore: [],  // 0-1
+        timestamps:   [],
+    },
+    // message-rate counter (updated every second)
+    msgRate: [],
+    msgRateTs: [],
+};
+
+let _vizMsgCountLast = 0;   // used for msg/s calculation
+
+function _vizPush(arr, val) {
+    arr.push(val);
+    if (arr.length > VIZ_MAX) arr.shift();
+}
+
+function _vizTimestamp() {
+    const d = new Date();
+    return d.getHours().toString().padStart(2,'0') + ':'
+         + d.getMinutes().toString().padStart(2,'0') + ':'
+         + d.getSeconds().toString().padStart(2,'0');
+}
+
+// Tick: update msg/s ring buffer every second
+setInterval(() => {
+    const rate = msgCount - _vizMsgCountLast;
+    _vizMsgCountLast = msgCount;
+    _vizPush(vizData.msgRate,   rate);
+    _vizPush(vizData.msgRateTs, _vizTimestamp());
+    // if vis page is open, refresh live charts
+    if (currentPage === 'visualisation') _vizRefreshCharts();
+}, 1000);
+
 function initNavigation() {
     const hamburgerBtn = document.getElementById('hamburger-btn');
     const sidebar = document.getElementById('sidebar');
@@ -74,6 +122,8 @@ function navigateToPage(page) {
         renderOverviewPage();
     } else if (page === 'analytics') {
         renderAnalyticsPage();
+    } else if (page === 'visualisation') {
+        renderVisualisationPage();
     } else if (page === 'docs') {
         renderDocumentationPage();
     }
@@ -270,6 +320,344 @@ function closeAssetDetail() {
     setTimeout(() => {
         overlay.style.display = 'none';
     }, 300);
+}
+
+// =====================================================================
+//  VISUALISATION PAGE
+// =====================================================================
+
+// Chart.js instances — kept so we can update data without re-rendering
+const _vizCharts = {};
+
+// Chart.js shared defaults (dark theme)
+function _vizChartDefaults(color, label, unit = '') {
+    return {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label,
+                data: [],
+                borderColor: color,
+                backgroundColor: color + '22',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                fill: true,
+                tension: 0.4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 300 },
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(10,14,26,0.92)',
+                    titleColor: '#f1f5f9',
+                    bodyColor: '#94a3b8',
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: ctx => ` ${ctx.parsed.y}${unit}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 6, maxRotation: 0 },
+                    grid:  { color: 'rgba(255,255,255,0.04)' },
+                },
+                y: {
+                    ticks: { color: '#64748b', font: { size: 10 } },
+                    grid:  { color: 'rgba(255,255,255,0.06)' },
+                }
+            }
+        }
+    };
+}
+
+function _vizMultiChartDefaults(colors, labels, unit = '') {
+    return {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: labels.map((lbl, i) => ({
+                label: lbl,
+                data: [],
+                borderColor: colors[i],
+                backgroundColor: colors[i] + '18',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                fill: false,
+                tension: 0.4,
+            }))
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 300 },
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12 }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(10,14,26,0.92)',
+                    titleColor: '#f1f5f9',
+                    bodyColor: '#94a3b8',
+                    borderColor: 'rgba(255,255,255,0.08)',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}${unit}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 6, maxRotation: 0 },
+                    grid:  { color: 'rgba(255,255,255,0.04)' },
+                },
+                y: {
+                    ticks: { color: '#64748b', font: { size: 10 } },
+                    grid:  { color: 'rgba(255,255,255,0.06)' },
+                }
+            }
+        }
+    };
+}
+
+function _vizInitCharts() {
+    // Destroy stale instances (navigation back-and-forth)
+    Object.values(_vizCharts).forEach(c => c.destroy());
+    Object.keys(_vizCharts).forEach(k => delete _vizCharts[k]);
+
+    const a1Color  = '#3b82f6';
+    const a2cColor = '#00e5ff';
+    const a2vColor = '#14b8a6';
+    const a3Color  = '#8b5cf6';
+    const rateColor = '#f59e0b';
+
+    const get = id => document.getElementById(id);
+
+    // A1 — Failure Probability
+    if (get('viz-chart-a1')) {
+        const cfg = _vizChartDefaults(a1Color, 'Failure Prob.', '%');
+        cfg.options.scales.y.min = 0; cfg.options.scales.y.max = 100;
+        cfg.data.labels               = [...vizData.A1.timestamps];
+        cfg.data.datasets[0].data     = [...vizData.A1.failureProb];
+        _vizCharts.a1 = new Chart(get('viz-chart-a1'), cfg);
+    }
+
+    // A2 — Cooler & Valve (multi-series)
+    if (get('viz-chart-a2')) {
+        const cfg = _vizMultiChartDefaults([a2cColor, a2vColor], ['Cooler', 'Valve'], '%');
+        cfg.options.scales.y.min = 0; cfg.options.scales.y.max = 100;
+        cfg.data.labels              = [...vizData.A2.timestamps];
+        cfg.data.datasets[0].data    = [...vizData.A2.cooler];
+        cfg.data.datasets[1].data    = [...vizData.A2.valve];
+        _vizCharts.a2 = new Chart(get('viz-chart-a2'), cfg);
+    }
+
+    // A3 — Anomaly Score
+    if (get('viz-chart-a3')) {
+        const cfg = _vizChartDefaults(a3Color, 'Anomaly Score');
+        cfg.options.scales.y.min = 0; cfg.options.scales.y.max = 1;
+        // danger zone annotation via background plugin workaround
+        cfg.data.labels              = [...vizData.A3.timestamps];
+        cfg.data.datasets[0].data    = [...vizData.A3.anomalyScore];
+        _vizCharts.a3 = new Chart(get('viz-chart-a3'), cfg);
+    }
+
+    // Msg/s rate
+    if (get('viz-chart-rate')) {
+        const cfg = _vizChartDefaults(rateColor, 'Messages/s', ' msg/s');
+        cfg.options.scales.y.min = 0;
+        cfg.data.labels              = [...vizData.msgRateTs];
+        cfg.data.datasets[0].data    = [...vizData.msgRate];
+        _vizCharts.rate = new Chart(get('viz-chart-rate'), cfg);
+    }
+}
+
+function _vizRefreshCharts() {
+    if (_vizCharts.a1) {
+        _vizCharts.a1.data.labels           = [...vizData.A1.timestamps];
+        _vizCharts.a1.data.datasets[0].data = [...vizData.A1.failureProb];
+        _vizCharts.a1.update('none');
+    }
+    if (_vizCharts.a2) {
+        _vizCharts.a2.data.labels           = [...vizData.A2.timestamps];
+        _vizCharts.a2.data.datasets[0].data = [...vizData.A2.cooler];
+        _vizCharts.a2.data.datasets[1].data = [...vizData.A2.valve];
+        _vizCharts.a2.update('none');
+    }
+    if (_vizCharts.a3) {
+        _vizCharts.a3.data.labels           = [...vizData.A3.timestamps];
+        _vizCharts.a3.data.datasets[0].data = [...vizData.A3.anomalyScore];
+        _vizCharts.a3.update('none');
+    }
+    if (_vizCharts.rate) {
+        _vizCharts.rate.data.labels           = [...vizData.msgRateTs];
+        _vizCharts.rate.data.datasets[0].data = [...vizData.msgRate];
+        _vizCharts.rate.update('none');
+    }
+
+    // Refresh KPI strip values
+    const a1Latest  = vizData.A1.failureProb.at(-1)   ?? null;
+    const a2cLatest = vizData.A2.cooler.at(-1)         ?? null;
+    const a2vLatest = vizData.A2.valve.at(-1)          ?? null;
+    const a3Latest  = vizData.A3.anomalyScore.at(-1)   ?? null;
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    // KPI strip (top)
+    set('viz-kpi-a1',  a1Latest  !== null ? a1Latest.toFixed(1)  + '%'   : '—');
+    set('viz-kpi-a2c', a2cLatest !== null ? a2cLatest.toFixed(0) + '%'   : '—');
+    set('viz-kpi-a2v', a2vLatest !== null ? a2vLatest.toFixed(0) + '%'   : '—');
+    set('viz-kpi-a3',  a3Latest  !== null ? a3Latest.toFixed(3)          : '—');
+
+    // Chart card "Latest" stats
+    set('viz-a1-latest',  a1Latest  !== null ? a1Latest.toFixed(1)  + '%'   : '—');
+    set('viz-a3-latest',  a3Latest  !== null ? a3Latest.toFixed(3)          : '—');
+    set('viz-a2c-latest', a2cLatest !== null ? a2cLatest.toFixed(0) + '%'   : '—');
+    set('viz-a2v-latest', a2vLatest !== null ? a2vLatest.toFixed(0) + '%'   : '—');
+}
+
+function renderVisualisationPage() {
+    const page = document.getElementById('page-visualisation');
+
+    page.innerHTML = `
+        <div class="page-container">
+            <h1 class="page-title">
+                <span class="viz-live-dot"></span>Visualisation
+            </h1>
+
+            <!-- KPI strip -->
+            <div class="viz-kpi-strip">
+                <div class="viz-kpi-card">
+                    <div class="viz-kpi-label">A1 — Failure Prob.</div>
+                    <div class="viz-kpi-value" id="viz-kpi-a1" style="color:var(--a1-color)">—</div>
+                </div>
+                <div class="viz-kpi-card">
+                    <div class="viz-kpi-label">A2 — Cooler</div>
+                    <div class="viz-kpi-value" id="viz-kpi-a2c" style="color:var(--a2-color)">—</div>
+                </div>
+                <div class="viz-kpi-card">
+                    <div class="viz-kpi-label">A2 — Valve</div>
+                    <div class="viz-kpi-value" id="viz-kpi-a2v" style="color:#14b8a6">—</div>
+                </div>
+                <div class="viz-kpi-card">
+                    <div class="viz-kpi-label">A3 — Anomaly Score</div>
+                    <div class="viz-kpi-value" id="viz-kpi-a3" style="color:var(--a3-color)">—</div>
+                </div>
+            </div>
+
+            <!-- Row 1: A1 + A3 -->
+            <div class="viz-grid">
+                <div class="chart-card">
+                    <div class="chart-card-header">
+                        <div class="chart-card-title">
+                            <span class="chart-dot a1"></span>
+                            A1 — CNC Failure Probability
+                        </div>
+                        <span class="chart-card-badge">Supervised</span>
+                    </div>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="viz-chart-a1"></canvas>
+                    </div>
+                    <div class="chart-status-row">
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Latest</span>
+                            <span class="chart-stat-value" id="viz-a1-latest">—</span>
+                        </div>
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Data Points</span>
+                            <span class="chart-stat-value">${vizData.A1.failureProb.length}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-card-header">
+                        <div class="chart-card-title">
+                            <span class="chart-dot a3"></span>
+                            A3 — APU Anomaly Score
+                        </div>
+                        <span class="chart-card-badge">Unsupervised</span>
+                    </div>
+                    <div class="chart-canvas-wrap">
+                        <canvas id="viz-chart-a3"></canvas>
+                    </div>
+                    <div class="chart-status-row">
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Latest</span>
+                            <span class="chart-stat-value" id="viz-a3-latest">—</span>
+                        </div>
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Threshold</span>
+                            <span class="chart-stat-value">0.400</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: A2 full width -->
+            <div class="viz-grid-full">
+                <div class="chart-card">
+                    <div class="chart-card-header">
+                        <div class="chart-card-title">
+                            <span class="chart-dot a2"></span>
+                            A2 — Hydraulic System Condition
+                        </div>
+                        <span class="chart-card-badge">Multi-target</span>
+                    </div>
+                    <div class="chart-canvas-wrap" style="height:200px">
+                        <canvas id="viz-chart-a2"></canvas>
+                    </div>
+                    <div class="chart-status-row">
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Cooler (latest)</span>
+                            <span class="chart-stat-value" id="viz-a2c-latest">—</span>
+                        </div>
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Valve (latest)</span>
+                            <span class="chart-stat-value" id="viz-a2v-latest">—</span>
+                        </div>
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Data Points</span>
+                            <span class="chart-stat-value">${vizData.A2.timestamps.length}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 3: MQTT message rate -->
+            <div class="viz-grid-full">
+                <div class="chart-card">
+                    <div class="chart-card-header">
+                        <div class="chart-card-title">
+                            <span class="chart-dot" style="background:var(--accent-amber)"></span>
+                            MQTT — Message Rate
+                        </div>
+                        <span class="chart-card-badge">Broker</span>
+                    </div>
+                    <div class="chart-canvas-wrap" style="height:140px">
+                        <canvas id="viz-chart-rate"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Initialise charts after DOM is painted
+    requestAnimationFrame(() => {
+        _vizInitCharts();
+        _vizRefreshCharts();
+    });
 }
 
 function renderOverviewPage() {
@@ -1207,6 +1595,9 @@ function onMessageArrived(message) {
                 setAssetGlow('A1', COLORS.good);
                 document.getElementById('a1-bar').style.background = 'linear-gradient(90deg, var(--a1-color), #6c9bff)';
             }
+            // ── Viz ring buffer push ──
+            _vizPush(vizData.A1.failureProb, parseFloat(prob) || 0);
+            _vizPush(vizData.A1.timestamps,  _vizTimestamp());
         }
 
         // ── A2 Hydraulics ──
@@ -1222,6 +1613,9 @@ function onMessageArrived(message) {
             setChip('a2-chip', cls.charAt(0).toUpperCase() + cls.slice(1), cls);
             setCardGlow('card-a2', 'asset-card ' + cls + '-glow');
             setAssetGlow('A2', COLORS[state]);
+            // ── Viz ring buffer push ──
+            _vizPush(vizData.A2.cooler,     Number(v) || 0);
+            _vizPush(vizData.A2.timestamps, _vizTimestamp());
         }
         else if (topic.includes('/A2/analytics/valve_condition') || topic.includes('/A2/condition/valve_condition_pct')) {
             let state = 'good';
@@ -1229,6 +1623,8 @@ function onMessageArrived(message) {
             if (v < 80) state = 'critical';
             document.getElementById('a2-valve').textContent = v + '%';
             document.getElementById('a2-valve').className = 'gauge-value mono ' + state;
+            // ── Viz ring buffer push ──
+            _vizPush(vizData.A2.valve, Number(v) || 0);
         }
 
         // ── A3 APU Compressor ──
@@ -1256,7 +1652,13 @@ function onMessageArrived(message) {
                 a3Vibration = 0;
                 document.getElementById('a3-bar').style.background = 'linear-gradient(90deg, var(--a3-color), #a78bfa)';
             }
+            // ── Viz ring buffer push ──
+            _vizPush(vizData.A3.anomalyScore, payload.score != null ? +payload.score : 0);
+            _vizPush(vizData.A3.timestamps,   _vizTimestamp());
         }
+
+        // Live-refresh visualisation page on every message
+        if (currentPage === 'visualisation') _vizRefreshCharts();
 
     } catch (e) {
         console.error('Parse error:', e);

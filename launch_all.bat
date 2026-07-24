@@ -1,48 +1,70 @@
 @echo off
-echo =========================================
-echo Launching JESA Digital Twin...
-echo =========================================
+:: JESA Digital Twin — One-Click Launcher (CMD / BAT)
+:: Double-click to run, or call from a terminal
+
+cd /d "%~dp0"
 
 echo.
-echo [1/4] Starting Docker Infrastructure...
+echo  =========================================
+echo   JESA Digital Twin - Full Stack Launcher
+echo  =========================================
+
+:: ── 1. Docker infrastructure ────────────────────────────────────
+echo.
+echo [1/6] Starting Docker infrastructure (Mosquitto / InfluxDB / Grafana / Telegraf)...
 docker compose up -d
+if %errorlevel% neq 0 (
+    echo [ERROR] docker compose failed. Make sure Docker Desktop is running.
+    pause
+    exit /b 1
+)
 
 echo.
-echo Waiting 5 seconds for Docker to initialize...
-timeout /t 5 /nobreak >nul
+echo        Waiting 8 s for containers to become healthy...
+timeout /t 8 /nobreak >nul
 
+:: ── 2. Asset simulators (A1 / A2 / A3) ─────────────────────────
 echo.
-echo [2/4] Starting OT Asset Simulators (OPC UA)...
-start "JESA - Asset Simulators" python -m sim all
+echo [2/6] Starting OT asset simulators (OPC UA: A1 / A2 / A3)...
+start "JESA - Simulators" python -m sim all
 
-echo.
-echo Waiting 2 seconds for OPC UA servers to bind ports...
-timeout /t 2 /nobreak >nul
+echo        Waiting 4 s for OPC UA servers to bind ports...
+timeout /t 4 /nobreak >nul
 
+:: ── 3. PLC ──────────────────────────────────────────────────────
 echo.
-echo [3/4] Starting PLC Controller...
-start "JESA - PLC Controller" python -m sim.plc
+echo [3/6] Starting PLC controller...
+start "JESA - PLC" python -m sim.plc
 
+:: ── 4. UNS Gateway ──────────────────────────────────────────────
 echo.
-echo [4/4] Starting UNS Gateway (OPC UA -^> MQTT)...
+echo [4/6] Starting UNS Gateway (OPC UA ^> MQTT)...
 start "JESA - UNS Gateway" python -m uns
 
-:: 5. Start 3D Digital Twin Web Server
-echo.
-echo [5/5] Starting 3D Digital Twin Web Server (Three.js)...
-start /b cmd /c "python -m http.server 8000 -d web-3d"
+echo        Waiting 3 s for gateway to connect...
+timeout /t 3 /nobreak >nul
 
+:: ── 5. ML Inference service ─────────────────────────────────────
 echo.
-echo =========================================
-echo [OK] All systems launched successfully!
-echo [INFO] Open Grafana at: http://localhost:3000 (admin/jesa-admin)
+echo [5/6] Starting ML Inference service (A1 / A2 / A3)...
+start "JESA - ML Inference" python uns/ml_inference_service.py
+
+:: ── 6. 3D Digital Twin web server ───────────────────────────────
 echo.
-echo =========================================
-echo [OK] All systems launched successfully!
-echo [INFO] Open Grafana at: http://localhost:3000 (admin/jesa-admin)
-echo [INFO] Open 3D Digital Twin at: http://localhost:8000
+echo [6/6] Starting 3D Digital Twin web server on port 8000...
+start "JESA - Web Server" cmd /c "cd web-3d && python -m http.server 8000"
+
+:: ── Done ────────────────────────────────────────────────────────
 echo.
-echo Note: Background terminal windows have been opened for the simulators, PLC, and gateway.
-echo Close them to stop the digital twin.
-echo =========================================
+echo  =========================================
+echo   All systems launched!
+echo  =========================================
+echo.
+echo   3D Digital Twin : http://localhost:8000
+echo   Grafana          : http://localhost:3000  (admin / jesa-admin)
+echo   InfluxDB         : http://localhost:8086  (jesa / jesa-dev-2026)
+echo.
+echo  Each Python service runs in its own terminal window.
+echo  Close those windows to shut down the digital twin.
+echo  =========================================
 pause

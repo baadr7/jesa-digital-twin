@@ -1,4 +1,4 @@
-# JESA Digital Twin
+﻿# JESA Digital Twin
 
 ## 📄 Internship Project Report
 For a full evaluation of this project as an internship deliverable at JESA, including proposed enhancements, see [INTERNSHIP_PROJECT_REPORT.md](file:///c:\Users\MSI\Documents\jesa\INTERNSHIP_PROJECT_REPORT.md).
@@ -38,50 +38,54 @@ JESA Digital Twin is an Industry 4.0 predictive maintenance platform that simula
 ```
 
 ## Quickstart
-### Step 0: Download Datasets (First Time Only)
-Run the dataset setup script to automatically download and organize all required datasets:
+
+### Quick Launch (One-click)
+The fastest way to start everything:
+- **Windows (CMD):** double-click `launch_all.bat`
+- **Windows (PowerShell):** right-click `launch_all.ps1` -> *Run with PowerShell*
+
+Both scripts start Docker, all simulators, PLC, UNS Gateway, ML Inference, and the web server in the correct order with health-check delays.
+
+### Manual Launch
+
+#### Step 0: Download Datasets (First Time Only)
 ```bash
 python setup_datasets.py
 ```
 *(Note: The MetroPT-3 dataset requires a Kaggle account; see script output for manual download instructions if needed.)*
 
-### Step 1: Start Docker Services
+#### Step 1: Start Docker Services
 ```bash
-cd jesa
 docker compose up -d
 ```
-Wait until all containers are healthy, especially InfluxDB and Grafana!
+Wait until all containers are healthy (Mosquitto, InfluxDB, Grafana).
 
-### Step 2: Run Simulators & PLC
-- Simulators (A1, A2, A3):
-  ```bash
-  python -m sim all
-  ```
-- PLC:
-  ```bash
-  python -m sim.plc
-  ```
+#### Step 2: Run Simulators & PLC
+```bash
+python -m sim all
+python -m sim.plc
+```
 
-### Step 3: Run UNS Gateway
+#### Step 3: Run UNS Gateway
 ```bash
 python -m uns
 ```
 
-### Step 4: Run ML Inference Service
+#### Step 4: Run ML Inference Service
 ```bash
 python uns/ml_inference_service.py
 ```
 
-### Step 5: Start 3D Digital Twin UI
+#### Step 5: Start 3D Digital Twin UI
 ```bash
 cd web-3d
 python -m http.server 8000
 ```
 
-### Step 6: Open Dashboards
+#### Step 6: Open Dashboards
 - **3D Digital Twin UI**: http://localhost:8000
-- **Grafana**: http://localhost:3000 (credentials: admin / jesa-admin)
-
+- **Grafana**: http://localhost:3000  (admin / jesa-admin)
+- **InfluxDB**: http://localhost:8086  (jesa / jesa-dev-2026)
 ## Credentials
 | Service      | Username  | Password          |
 |--------------|-----------|-------------------|
@@ -117,7 +121,8 @@ jesa/
 - **Scene lift** — the ground and machines rise when a detail panel opens, giving a clear top-down view of the selected asset
 - **Reset View** — restores the scene and camera to the initial position
 - **Auto-rotate** — scene rotates automatically, pauses on interaction, resumes after 8 s
-- **Sidebar navigation** — Overview, Analytics, and Documentation pages accessible via hamburger menu
+- **Sidebar navigation** — Overview, Analytics, Visualisation, and Documentation pages accessible via hamburger menu
+- **Visualisation page** — real-time Chart.js plots for A1 failure probability, A2 cooler/valve condition, A3 anomaly score, and MQTT message rate; fed live by the MQTT pipeline
 
 ## Screenshots
 - **3D Digital Twin UI**: `c:\Users\MSI\AppData\Local\Temp\trae\screenshots\jesa-3d-digital-twin-final.png`

@@ -823,11 +823,11 @@ function renderAnalyticsPage() {
         {
             name: 'CNC Failure Predictor',
             asset: 'A1', color: 'var(--a1-color)',
-            type: 'Binary Classification',
-            algo: 'XGBoost + SMOTE',
+            type: 'Binary Classification + Per-Mode',
+            algo: 'XGBoost + SMOTE (7 models)',
             dataset: 'AI4I 2020 (10 000 samples, 3.4% failure rate)',
-            accuracy: '97.05%', f1: '82.75% (macro) / 67.04% (binary)', precision: '54.05%', recall: '88.24%',
-            note: 'ROC-AUC = 0.9845 · Avg Precision = 0.8657. High recall (88%) is the priority given the cost of missed failures. Low precision reflects the 28.5:1 class imbalance.',
+            accuracy: '97.05%', f1: '82.75% macro / Binary F1: 81.75%', precision: '54.05%', recall: '88.24%',
+            note: 'ROC-AUC=0.9855 · AP=0.8657. Per-mode: HDF F1=0.949 · PWF F1=0.929 · OSF F1=1.000 · TWF F1=0.071 (46 events) · RNF F1=0.000 (19 events — random, undetectable by design).',
             status: 'active',
         },
         {

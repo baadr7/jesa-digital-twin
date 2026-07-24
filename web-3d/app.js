@@ -4,6 +4,331 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
+// ================================================================
+// NAVIGATION & PAGE MANAGEMENT
+// ================================================================
+let currentPage = 'live';
+
+function initNavigation() {
+    const hamburgerBtn = document.getElementById('hamburger-btn');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const sidebarItems = document.querySelectorAll('.sidebar-item');
+
+    // Toggle sidebar with hamburger button
+    hamburgerBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('active');
+        sidebarOverlay.classList.toggle('active');
+    });
+
+    // Close sidebar when clicking overlay
+    sidebarOverlay.addEventListener('click', () => {
+        sidebar.classList.remove('active');
+        sidebarOverlay.classList.remove('active');
+    });
+
+    // Handle sidebar navigation
+    sidebarItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const page = item.dataset.page;
+            navigateToPage(page);
+            
+            // Close sidebar
+            sidebar.classList.remove('active');
+            sidebarOverlay.classList.remove('active');
+        });
+    });
+}
+
+function navigateToPage(page) {
+    currentPage = page;
+    
+    // Update active sidebar item
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.page === page) {
+            item.classList.add('active');
+        }
+    });
+
+    // Show/hide page contents
+    document.querySelectorAll('.page-content').forEach(container => {
+        container.classList.remove('active');
+        if (container.dataset.page === page) {
+            container.classList.add('active');
+        }
+    });
+
+    // Show/hide UI overlay only on live page
+    const uiOverlay = document.getElementById('ui-overlay');
+    if (page === 'live') {
+        uiOverlay.style.opacity = '1';
+        uiOverlay.style.pointerEvents = 'auto';
+    } else {
+        uiOverlay.style.opacity = '0';
+        uiOverlay.style.pointerEvents = 'none';
+    }
+
+    // Render page content
+    if (page === 'overview') {
+        renderOverviewPage();
+    } else if (page === 'analytics') {
+        renderAnalyticsPage();
+    } else if (page === 'docs') {
+        renderDocumentationPage();
+    }
+}
+
+function renderOverviewPage() {
+    const page = document.getElementById('page-overview');
+    
+    // Mock data
+    const assets = [
+        { name: 'A1 — CNC Milling', status: 'healthy' },
+        { name: 'A2 — Hydraulic System', status: 'healthy' },
+        { name: 'A3 — APU Compressor', status: 'warning' }
+    ];
+    
+    const activities = [
+        { time: '10:24:15', text: 'A1 failure probability updated to 2.4%', severity: 'info' },
+        { time: '10:22:08', text: 'A3 anomaly score spike detected (0.61)', severity: 'warning' },
+        { time: '10:18:42', text: 'A2 cooler condition improved to 98%', severity: 'info' },
+        { time: '10:15:30', text: 'MQTT connection re-established', severity: 'info' },
+        { time: '10:12:18', text: 'A1 machine status: HEALTHY', severity: 'info' }
+    ];
+
+    page.innerHTML = `
+        <div class="page-container">
+            <h1 class="page-title">Overview</h1>
+            
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Overall Equipment Effectiveness</div>
+                    <div class="kpi-card-value">89.4%</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Total Uptime</div>
+                    <div class="kpi-card-value">98.2%</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Active Alerts</div>
+                    <div class="kpi-card-value" style="color: var(--accent-amber)">1</div>
+                </div>
+            </div>
+
+            <h2 class="section-title">Asset Status</h2>
+            <div class="asset-grid">
+                ${assets.map(asset => `
+                    <div class="asset-status-card" onclick="navigateToPage('live')">
+                        <div class="asset-status-header">
+                            <div class="asset-status-name">${asset.name}</div>
+                            <span class="status-badge ${asset.status}">${asset.status}</span>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 13px; margin-top: 8px;">
+                            Click to view in Live Twin
+                        </p>
+                    </div>
+                `).join('')}
+            </div>
+
+            <h2 class="section-title">Recent Activity</h2>
+            <div class="activity-log">
+                ${activities.map(act => `
+                    <div class="activity-item">
+                        <span class="activity-time">${act.time}</span>
+                        <span class="activity-text">${act.text}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderAnalyticsPage() {
+    const page = document.getElementById('page-analytics');
+    
+    const models = [
+        { name: 'CNC Failure Predictor', asset: 'A1', type: 'Classification', version: 'v1.2.0', lastTrained: '2024-07-20', status: 'Active' },
+        { name: 'Hydraulic Condition Monitor', asset: 'A2', type: 'Multi-target', version: 'v2.0.1', lastTrained: '2024-07-18', status: 'Active' },
+        { name: 'APU Anomaly Detector', asset: 'A3', type: 'Anomaly Detection', version: 'v1.0.0', lastTrained: '2024-07-22', status: 'Active' }
+    ];
+
+    page.innerHTML = `
+        <div class="page-container">
+            <h1 class="page-title">Analytics</h1>
+            
+            <h2 class="section-title">Model Registry</h2>
+            <table class="model-table">
+                <thead>
+                    <tr>
+                        <th>Model Name</th>
+                        <th>Asset</th>
+                        <th>Type</th>
+                        <th>Version</th>
+                        <th>Last Trained</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${models.map(m => `
+                        <tr>
+                            <td style="font-weight: 600;">${m.name}</td>
+                            <td>${m.asset}</td>
+                            <td>${m.type}</td>
+                            <td><code>${m.version}</code></td>
+                            <td>${m.lastTrained}</td>
+                            <td><span class="status-badge healthy">${m.status}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+
+            <h2 class="section-title">Model Performance</h2>
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Average Accuracy</div>
+                    <div class="kpi-card-value">96.8%</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">Precision (Macro)</div>
+                    <div class="kpi-card-value">95.2%</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">F1 Score (Macro)</div>
+                    <div class="kpi-card-value">94.9%</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+const documentationMarkdown = `
+# Documentation
+
+Welcome to the JESA Digital Twin technical documentation.
+
+## System Architecture
+
+The JESA Digital Twin system consists of three main components:
+
+1. **3D Visualization Layer**: Real-time 3D representation of the factory floor using Three.js
+2. **MQTT Data Pipeline**: Real-time data ingestion from sensors and edge devices
+3. **Analytics Backend**: Machine learning models for predictive maintenance and anomaly detection
+
+## Sensor / Asset Reference
+
+### Asset A1: CNC Milling Machine
+- **Location**: Workshop Zone 1
+- **Sensors**: Vibration, Temperature, Current
+- **Data Frequency**: 100 Hz
+
+### Asset A2: Hydraulic System
+- **Location**: Workshop Zone 1
+- **Sensors**: Pressure, Temperature, Flow Rate
+- **Data Frequency**: 50 Hz
+
+### Asset A3: APU Compressor
+- **Location**: Workshop Zone 2
+- **Sensors**: Vibration, Acoustic Emission
+- **Data Frequency**: 200 Hz
+
+## MQTT Topic Schema
+
+\`\`\`
+jesa/
+└── site1/
+    └── workshop/
+        ├── milling/
+        │   └── A1/
+        │       ├── analytics/
+        │       │   └── machine_failure
+        │       └── status/
+        │           └── machine_failure
+        ├── hydraulics/
+        │   └── A2/
+        │       ├── analytics/
+        │       │   ├── cooler_condition
+        │       │   └── valve_condition
+        │       └── condition/
+        │           ├── cooler_condition_pct
+        │           └── valve_condition_pct
+        └── fleet/
+            └── A3/
+                └── analytics/
+                    └── anomaly
+\`\`\`
+
+## Alert Thresholds & Definitions
+
+| Alert Level | Failure Probability | Anomaly Score |
+|-------------|---------------------|---------------|
+| Healthy     | < 5%                | < 0.4         |
+| Warning     | 5% - 20%            | 0.4 - 0.7     |
+| Critical    | > 20%               | > 0.7         |
+
+## Troubleshooting
+
+### MQTT Connection Issues
+
+If you see "MQTT failed: AMQJS0007E Socket error", check:
+
+1. That the MQTT broker is running on localhost:9001
+2. That there are no firewall rules blocking the connection
+3. That the broker allows WebSocket connections
+`;
+
+function renderDocumentationPage() {
+    const page = document.getElementById('page-docs');
+    
+    page.innerHTML = `
+        <div class="page-container">
+            <h1 class="page-title">Documentation</h1>
+            
+            <div class="docs-container">
+                <div class="docs-sidebar">
+                    <input type="text" class="docs-search" id="docs-search" placeholder="Search documentation...">
+                    <div id="docs-toc">
+                        <div class="docs-toc-item active" data-section="all">All Sections</div>
+                        <div class="docs-toc-item" data-section="architecture">System Architecture</div>
+                        <div class="docs-toc-item" data-section="assets">Sensor / Asset Reference</div>
+                        <div class="docs-toc-item" data-section="mqtt">MQTT Topic Schema</div>
+                        <div class="docs-toc-item" data-section="alerts">Alert Thresholds & Definitions</div>
+                        <div class="docs-toc-item" data-section="troubleshooting">Troubleshooting</div>
+                    </div>
+                </div>
+                <div class="docs-content" id="docs-content">
+                    ${marked.parse(documentationMarkdown)}
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add search functionality
+    const searchInput = document.getElementById('docs-search');
+    const tocItems = document.querySelectorAll('.docs-toc-item');
+    
+    searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        const content = document.getElementById('docs-content');
+        
+        if (query) {
+            content.innerHTML = marked.parse(documentationMarkdown).toLowerCase().includes(query) 
+                ? marked.parse(documentationMarkdown) 
+                : '<p style="color: var(--text-muted)">No results found.</p>';
+        } else {
+            content.innerHTML = marked.parse(documentationMarkdown);
+        }
+    });
+
+    // Add TOC click functionality
+    tocItems.forEach(item => {
+        item.addEventListener('click', () => {
+            tocItems.forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+        });
+    });
+}
+
 // =====================================================================
 //  SCENE SETUP
 // =====================================================================
@@ -781,3 +1106,6 @@ document.getElementById('reconnect-mqtt').addEventListener('click', () => {
     buildClient();
     connectClient();
 });
+
+// Initialize navigation
+initNavigation();

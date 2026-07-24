@@ -79,6 +79,199 @@ function navigateToPage(page) {
     }
 }
 
+// Helper function to safely get text content
+function getTextContent(id) {
+    const el = document.getElementById(id);
+    return el ? el.textContent : '—';
+}
+
+// =====================================================================
+//  ASSET PANEL — 3D scene shift helpers
+//  Base Y positions (set after buildA1/A2/A3 + ground creation)
+//  We shift ground, grid & all asset groups by PANEL_LIFT when a
+//  detail panel opens, then restore them when it closes.
+// =====================================================================
+const PANEL_LIFT = 60;         // units to raise everything when panel opens
+let   panelLiftActive  = false; // guard against double-apply
+let   sceneLiftedCount = 0;     // tracks if scene is physically lifted
+
+function _applyPanelLift(delta) {
+    // ground & grid (set globally after scene init — resolved at runtime)
+    if (window._ground) window._ground.position.y += delta;
+    if (window._grid)   window._grid.position.y   += delta;
+    // all asset groups
+    ['A1', 'A2', 'A3'].forEach(id => {
+        const g = assets[id] && assets[id].group;
+        if (g) g.position.y += delta;
+    });
+}
+
+function raisePanelScene() {
+    if (panelLiftActive) return;
+    panelLiftActive = true;
+    sceneLiftedCount++;
+    _applyPanelLift(+PANEL_LIFT);
+}
+
+function restorePanelScene() {
+    // Scene stays raised visually — just reset the open/close guard
+    panelLiftActive = false;
+}
+
+// Asset detail panel functions
+function openAssetDetail(assetId) {
+    const overlay = document.getElementById('asset-detail-overlay');
+    const panel = document.getElementById('asset-detail-panel');
+    const content = document.getElementById('detail-content');
+    
+    // Populate content
+    let title = '';
+    let description = '';
+    let details = [];
+    let performance = [];
+    let accentColor = '';
+    
+    switch(assetId) {
+        case 'A1':
+            title = 'A1 — CNC Milling Machine';
+            description = 'Precision CNC machining center for metal parts.';
+            accentColor = 'var(--a1-color)';
+            details = [
+                { label: 'Location', value: 'Workshop Zone 1' },
+                { label: 'Type', value: 'Vertical Machining Center' },
+                { label: 'Model', value: 'VMC-850' },
+                { label: 'Serial', value: 'VMC-2023-0042' },
+                { label: 'Install Date', value: '2023-06-15' }
+            ];
+            performance = [
+                { label: 'Machine Status', value: getTextContent('a1-status') },
+                { label: 'Failure Probability', value: getTextContent('a1-prob') },
+                { label: 'Last Update', value: getTextContent('a1-last') },
+                { label: 'Status', value: getTextContent('a1-chip') }
+            ];
+            break;
+        case 'A2':
+            title = 'A2 — Hydraulic System';
+            description = 'High-pressure hydraulic power unit for industrial machines.';
+            accentColor = 'var(--a2-color)';
+            details = [
+                { label: 'Location', value: 'Workshop Zone 1' },
+                { label: 'Type', value: 'Hydraulic Power Unit' },
+                { label: 'Model', value: 'HPU-200' },
+                { label: 'Serial', value: 'HPU-2023-0018' },
+                { label: 'Install Date', value: '2023-03-22' }
+            ];
+            performance = [
+                { label: 'Cooler Condition', value: getTextContent('a2-cooler') },
+                { label: 'Valve Health', value: getTextContent('a2-valve') },
+                { label: 'Last Update', value: getTextContent('a2-last') },
+                { label: 'Status', value: getTextContent('a2-chip') }
+            ];
+            break;
+        case 'A3':
+            title = 'A3 — APU Compressor';
+            description = 'Air compressor unit for pneumatic systems and tools.';
+            accentColor = 'var(--a3-color)';
+            details = [
+                { label: 'Location', value: 'Workshop Zone 2' },
+                { label: 'Type', value: 'Rotary Screw Compressor' },
+                { label: 'Model', value: 'RSC-150' },
+                { label: 'Serial', value: 'RSC-2023-0076' },
+                { label: 'Install Date', value: '2023-09-08' }
+            ];
+            performance = [
+                { label: 'Anomaly Status', value: getTextContent('a3-status') },
+                { label: 'Anomaly Score', value: getTextContent('a3-score') },
+                { label: 'Last Update', value: getTextContent('a3-last') },
+                { label: 'Status', value: getTextContent('a3-chip') }
+            ];
+            break;
+    }
+    
+    // Build HTML with matching asset card style
+    let html = `
+        <style>
+            .detail-header {
+                display: flex;
+                gap: 12px;
+                margin-bottom: 16px;
+            }
+            .detail-icon {
+                width: 40px;
+                height: 40px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: var(--radius-sm);
+                border: 1px solid ${accentColor};
+                background: rgba(0, 0, 0, 0.2);
+                color: ${accentColor};
+            }
+        </style>
+        
+        <div class="detail-header">
+            <div class="detail-icon">
+                ${assetId === 'A1' ? '⚙️' : assetId === 'A2' ? '🔧' : '🌀'}
+            </div>
+            <div>
+                <h2 style="color: var(--text-primary); margin: 0; font-size: 1.1rem;">${title}</h2>
+                <span style="color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;">
+                    ${assetId === 'A1' ? 'Supervised Classification' : assetId === 'A2' ? 'Multi-target Classification' : 'Unsupervised Anomaly Detection'}
+                </span>
+            </div>
+        </div>
+        
+        <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 0.9rem;">${description}</p>
+        
+        <div class="detail-section">
+            <h3>Asset Details</h3>
+            ${details.map(d => `
+                <div class="detail-item">
+                    <span>${d.label}</span>
+                    <span class="value">${d.value}</span>
+                </div>
+            `).join('')}
+        </div>
+        
+        <div class="detail-section">
+            <h3>Performance</h3>
+            ${performance.map(p => `
+                <div class="detail-item">
+                    <span>${p.label}</span>
+                    <span class="value">${p.value}</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    
+    content.innerHTML = html;
+    
+    // Raise 3D scene so the machine is well visible in the background
+    raisePanelScene();
+
+    // Show panel
+    overlay.style.display = 'block';
+    setTimeout(() => {
+        overlay.classList.add('active');
+        panel.classList.add('active');
+    }, 10);
+}
+
+function closeAssetDetail() {
+    const overlay = document.getElementById('asset-detail-overlay');
+    const panel = document.getElementById('asset-detail-panel');
+    
+    overlay.classList.remove('active');
+    panel.classList.remove('active');
+
+    // Restore 3D scene to original positions
+    restorePanelScene();
+    
+    setTimeout(() => {
+        overlay.style.display = 'none';
+    }, 300);
+}
+
 function renderOverviewPage() {
     const page = document.getElementById('page-overview');
     
@@ -349,8 +542,8 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0f172a);
 scene.fog = new THREE.FogExp2(0x0f172a, 0.008);
 
-const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 500);
-camera.position.set(0, 22, 45);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+camera.position.set(0, 18, 50);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -414,15 +607,18 @@ scene.add(rimLight2);
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.85, metalness: 0.1 });
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), groundMat);
 ground.rotation.x = -Math.PI / 2;
+ground.position.y = 5;
 ground.receiveShadow = true;
 scene.add(ground);
+window._ground = ground; // exposed for panel lift
 
 // Grid
 const grid = new THREE.GridHelper(120, 60, 0x00e5ff, 0x0a1530);
-grid.position.y = 0.02;
+grid.position.y = 5.02;
 grid.material.opacity = 0.12;
 grid.material.transparent = true;
 scene.add(grid);
+window._grid = grid; // exposed for panel lift
 
 // Subtle particles
 const pCount = 600;
@@ -575,7 +771,7 @@ function buildA1() {
 
     assets.A1.group = g;
     assets.A1.glowParts = [glowMat, ring2.material];
-    g.position.set(-18, 0, 0);
+    g.position.set(-18, 5, 0);
     scene.add(g);
 }
 
@@ -690,7 +886,7 @@ function buildA2() {
 
     assets.A2.group = g;
     assets.A2.glowParts = [glowMat, r2.material];
-    g.position.set(0, 0, 0);
+    g.position.set(0, 5, 0);
     scene.add(g);
 }
 
@@ -796,7 +992,7 @@ function buildA3() {
 
     assets.A3.group = g;
     assets.A3.glowParts = [glowMat, r2.material];
-    g.position.set(20, 0, 0);
+    g.position.set(20, 5, 0);
     scene.add(g);
 }
 
@@ -948,9 +1144,15 @@ function refreshTelemetryHealth() {
 }
 
 function resetCamera() {
+    // If scene was physically lifted, bring it back down
+    if (sceneLiftedCount > 0) {
+        _applyPanelLift(-PANEL_LIFT * sceneLiftedCount);
+        sceneLiftedCount = 0;
+        panelLiftActive = false;
+    }
     controls.autoRotate = true;
     controls.target.set(0, 4, 0);
-    camera.position.set(0, 22, 45);
+    camera.position.set(0, 18, 50);
     document.querySelectorAll('.asset-card').forEach(c => c.style.outline = 'none');
 }
 
@@ -1078,14 +1280,20 @@ renderer.domElement.addEventListener('click', (e) => {
         if (hits.length > 0) {
             controls.autoRotate = false;
             const pos = asset.group.position;
-            controls.target.set(pos.x, 4, pos.z);
-            camera.position.set(pos.x + 8, 12, pos.z + 15);
 
             // Highlight corresponding card
             document.querySelectorAll('.asset-card').forEach(c => c.style.outline = 'none');
             const card = document.getElementById('card-' + id.toLowerCase());
             card.style.outline = '1px solid rgba(0,229,255,0.4)';
             card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+            // Open detail panel first — this calls raisePanelScene() which shifts pos.y by +PANEL_LIFT
+            openAssetDetail(id);
+
+            // Point camera at the raised asset position
+            const raisedY = pos.y; // pos.y already updated by raisePanelScene
+            controls.target.set(pos.x, raisedY , pos.z);
+            camera.position.set(pos.x + 8, raisedY + 5, pos.z + 30);
 
             setTimeout(() => { controls.autoRotate = true; }, 8000);
             break;
@@ -1100,8 +1308,15 @@ document.querySelectorAll('.asset-card').forEach(card => {
         if (!assets[id] || !assets[id].group) return;
         controls.autoRotate = false;
         const pos = assets[id].group.position;
-        controls.target.set(pos.x, 4, pos.z);
-        camera.position.set(pos.x + 8, 12, pos.z + 15);
+
+        // Open detail panel first — this calls raisePanelScene() which shifts pos.y by +PANEL_LIFT
+        openAssetDetail(id);
+
+        // Point camera at the raised asset position
+        const raisedY = pos.y; // pos.y already updated by raisePanelScene
+        controls.target.set(pos.x, raisedY , pos.z);
+        camera.position.set(pos.x + 8, raisedY + 5, pos.z + 30);
+        
         setTimeout(() => { controls.autoRotate = true; }, 8000);
     });
 });
@@ -1121,3 +1336,7 @@ document.getElementById('reconnect-mqtt').addEventListener('click', () => {
 
 // Initialize navigation
 initNavigation();
+
+// Initialize asset detail panel handlers
+document.getElementById('close-detail-panel').addEventListener('click', closeAssetDetail);
+document.getElementById('asset-detail-overlay').addEventListener('click', closeAssetDetail);

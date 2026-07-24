@@ -112,6 +112,13 @@ jesa/
 └── README.md          # This file
 ```
 
+## 3D Digital Twin — UI Features
+- **Interactive asset panels** — click any machine (3D object or asset card) to open a centered detail panel with live telemetry, asset info, and performance data
+- **Scene lift** — the ground and machines rise when a detail panel opens, giving a clear top-down view of the selected asset
+- **Reset View** — restores the scene and camera to the initial position
+- **Auto-rotate** — scene rotates automatically, pauses on interaction, resumes after 8 s
+- **Sidebar navigation** — Overview, Analytics, and Documentation pages accessible via hamburger menu
+
 ## Screenshots
 - **3D Digital Twin UI**: `c:\Users\MSI\AppData\Local\Temp\trae\screenshots\jesa-3d-digital-twin-final.png`
 - **Grafana Dashboards**: `c:\Users\MSI\AppData\Local\Temp\trae\screenshots\jesa-grafana-dashboards-final.png`

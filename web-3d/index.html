@@ -12,39 +12,35 @@
     <!-- Paho MQTT (v1.1.0 exposes Paho.Client) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
 
-    <!-- Three.js (using CDNJS instead to avoid ORB issues) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
-    <!-- Recharts for charts (using CDN) -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/recharts@2.10.4/umd/Recharts.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <!-- Marked for Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
-    <!-- 3D Canvas Container (only visible on Live Twin page) -->
-    <div id="canvas-container" class="page-only-live-twin"></div>
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
 
-    <!-- Overlay -->
+    <!-- UI Overlay -->
     <div id="ui-overlay">
+
         <!-- Top Bar -->
         <header id="top-bar">
-            <div class="top-bar-left">
-                <button id="hamburger-btn" class="control-btn hamburger" type="button">☰</button>
-                <div class="brand">
-                    <div class="brand-icon">
-                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#brandGrad)" stroke-width="2">
-                            <defs><linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00f0ff"/><stop offset="100%" stop-color="#7b61ff"/></linearGradient></defs>
-                            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <h1>JESA Digital Twin</h1>
-                        <span class="brand-sub">Industry 4.0 — Predictive Maintenance</span>
-                    </div>
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#brandGrad)" stroke-width="2">
+                        <defs><linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00f0ff"/><stop offset="100%" stop-color="#7b61ff"/></linearGradient></defs>
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>JESA Digital Twin</h1>
+                    <span class="brand-sub">Industry 4.0 — Predictive Maintenance</span>
                 </div>
             </div>
             <div class="top-bar-right">
@@ -64,37 +60,14 @@
                     <span class="conn-dot"></span>
                     <span class="conn-text">Connecting</span>
                 </div>
-                <button id="reset-view" class="control-btn page-only-live-twin" type="button">Reset View</button>
+                <button id="reset-view" class="control-btn" type="button">Reset View</button>
                 <button id="reconnect-mqtt" class="control-btn" type="button">Reconnect MQTT</button>
             </div>
         </header>
 
-        <!-- Sidebar Navigation -->
-        <div id="sidebar-overlay" class="sidebar-overlay"></div>
-        <nav id="sidebar" class="sidebar">
-            <div class="sidebar-header">Navigation</div>
-            <ul class="sidebar-nav">
-                <li class="sidebar-item" data-page="live-twin">
-                    <span class="sidebar-icon">🖥️</span>
-                    <span>Live Twin</span>
-                </li>
-                <li class="sidebar-item" data-page="overview">
-                    <span class="sidebar-icon">📊</span>
-                    <span>Overview</span>
-                </li>
-                <li class="sidebar-item" data-page="analytics">
-                    <span class="sidebar-icon">📈</span>
-                    <span>Analytics</span>
-                </li>
-                <li class="sidebar-item" data-page="documentation">
-                    <span class="sidebar-icon">📚</span>
-                    <span>Documentation</span>
-                </li>
-            </ul>
-        </nav>
+        <!-- Asset Cards -->
+        <div id="cards-row">
 
-        <!-- Asset Cards (Live Twin only) -->
-        <div id="cards-row" class="page-only-live-twin">
             <!-- A1 Card -->
             <div class="asset-card" id="card-a1" data-asset="A1">
                 <div class="card-header">
@@ -186,17 +159,12 @@
             </div>
         </div>
 
-        <!-- Camera controls hint (Live Twin only) -->
-        <div id="cam-hint" class="page-only-live-twin">
-            <span>🖱️ Orbit</span> <span>⚙️ Scroll to zoom</span> <span>Click asset to focus</span>
+        <!-- Camera controls hint -->
+        <div id="cam-hint">
+            <span>🖱 Orbit</span> <span>⚙ Scroll to zoom</span> <span>Click asset to focus</span>
         </div>
-
-        <!-- Page Content Containers -->
-        <div id="page-overview" class="page-content page-only-overview"></div>
-        <div id="page-analytics" class="page-content page-only-analytics"></div>
-        <div id="page-documentation" class="page-content page-only-documentation"></div>
     </div>
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>

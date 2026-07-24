@@ -10,6 +10,100 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 let currentPage = 'live';
 
 // =====================================================================
+//  ACTIVITY LOG — fed by onMessageArrived, shown on Overview page
+// =====================================================================
+const ACTIVITY_MAX = 50;
+const activityLog  = []; // { time, text, severity }
+
+function _logEvent(text, severity = 'info') {
+    const now = new Date();
+    const ts  = now.getHours().toString().padStart(2,'0') + ':'
+              + now.getMinutes().toString().padStart(2,'0') + ':'
+              + now.getSeconds().toString().padStart(2,'0');
+    activityLog.unshift({ time: ts, text, severity });
+    if (activityLog.length > ACTIVITY_MAX) activityLog.pop();
+    // live-refresh overview if open
+    if (currentPage === 'overview') _refreshOverviewDynamic();
+}
+
+// =====================================================================
+//  LIVE ASSET STATUS — helpers to read DOM chips from live twin
+// =====================================================================
+function _getAssetStatus(id) {
+    // id = 'a1' | 'a2' | 'a3'
+    const chip = document.getElementById(id + '-chip');
+    if (!chip) return 'unknown';
+    const txt = chip.textContent.trim().toLowerCase();
+    if (txt.includes('critical') || txt.includes('anomaly') || txt.includes('failure')) return 'critical';
+    if (txt.includes('warning') || txt.includes('stale') || txt.includes('degraded')) return 'warning';
+    if (txt.includes('healthy') || txt.includes('normal') || txt.includes('optimal')) return 'healthy';
+    return 'initializing';
+}
+
+function _countAlerts() {
+    return ['a1','a2','a3'].filter(id => _getAssetStatus(id) === 'critical').length;
+}
+
+function _uptimeStr() {
+    const sec = Math.floor((Date.now() - startTime) / 1000);
+    const h   = Math.floor(sec / 3600);
+    const m   = Math.floor((sec % 3600) / 60);
+    const s   = sec % 60;
+    return h > 0
+        ? `${h}h ${m.toString().padStart(2,'0')}m`
+        : `${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`;
+}
+
+// Called every second to refresh dynamic elements on overview
+function _refreshOverviewDynamic() {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+    // KPI strip
+    const alerts = _countAlerts();
+    set('ov-uptime',  _uptimeStr());
+    set('ov-msgs',    msgCount.toLocaleString());
+    set('ov-alerts',  alerts);
+
+    // Alert color
+    const alertEl = document.getElementById('ov-alerts');
+    if (alertEl) alertEl.style.color = alerts > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
+
+    // Asset status badges
+    ['a1','a2','a3'].forEach(id => {
+        const badge = document.getElementById('ov-badge-' + id);
+        if (!badge) return;
+        const status = _getAssetStatus(id);
+        badge.className = 'status-badge ' + (status === 'initializing' ? 'warning' : status);
+        badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    });
+
+    // Last-seen
+    ['A1','A2','A3'].forEach(id => {
+        const el = document.getElementById('ov-lastseen-' + id.toLowerCase());
+        if (!el) return;
+        const ls = assetTelemetry[id] && assetTelemetry[id].lastSeen;
+        if (!ls) { el.textContent = 'No data yet'; return; }
+        const ago = Math.floor((Date.now() - ls) / 1000);
+        el.textContent = ago < 5 ? 'Just now' : ago + 's ago';
+    });
+
+    // Activity log
+    const logEl = document.getElementById('ov-activity-log');
+    if (logEl && activityLog.length > 0) {
+        logEl.innerHTML = activityLog.slice(0, 12).map(e => `
+            <div class="activity-item">
+                <span class="activity-time">${e.time}</span>
+                <span class="activity-text" style="color:${
+                    e.severity === 'critical' ? 'var(--accent-red)'
+                  : e.severity === 'warning'  ? 'var(--accent-amber)'
+                  : 'var(--text-primary)'}">${e.text}</span>
+            </div>`).join('');
+    } else if (logEl && activityLog.length === 0) {
+        logEl.innerHTML = '<div class="activity-item"><span class="activity-text" style="color:var(--text-muted)">Waiting for MQTT data...</span></div>';
+    }
+}
+
+// =====================================================================
 //  VISUALISATION — Ring buffers (50 pts) fed by onMessageArrived
 // =====================================================================
 const VIZ_MAX = 50; // max data-points kept per series
@@ -662,122 +756,201 @@ function renderVisualisationPage() {
 
 function renderOverviewPage() {
     const page = document.getElementById('page-overview');
-    
-    // Mock data
-    const assets = [
-        { name: 'A1 — CNC Milling', status: 'healthy' },
-        { name: 'A2 — Hydraulic System', status: 'healthy' },
-        { name: 'A3 — APU Compressor', status: 'warning' }
-    ];
-    
-    const activities = [
-        { time: '10:24:15', text: 'A1 failure probability updated to 2.4%', severity: 'info' },
-        { time: '10:22:08', text: 'A3 anomaly score spike detected (0.61)', severity: 'warning' },
-        { time: '10:18:42', text: 'A2 cooler condition improved to 98%', severity: 'info' },
-        { time: '10:15:30', text: 'MQTT connection re-established', severity: 'info' },
-        { time: '10:12:18', text: 'A1 machine status: HEALTHY', severity: 'info' }
+
+    // Build asset rows dynamically
+    const assetDefs = [
+        { id: 'a1', label: 'A1 — CNC Milling',      zone: 'Workshop Zone 1' },
+        { id: 'a2', label: 'A2 — Hydraulic System',  zone: 'Workshop Zone 1' },
+        { id: 'a3', label: 'A3 — APU Compressor',    zone: 'Workshop Zone 2' },
     ];
 
     page.innerHTML = `
         <div class="page-container">
             <h1 class="page-title">Overview</h1>
-            
+
+            <!-- Live KPI strip -->
             <div class="kpi-grid">
                 <div class="kpi-card">
-                    <div class="kpi-card-label">Overall Equipment Effectiveness</div>
-                    <div class="kpi-card-value">89.4%</div>
+                    <div class="kpi-card-label">Session Uptime</div>
+                    <div class="kpi-card-value" id="ov-uptime" style="color:var(--accent-cyan)">—</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-card-label">Total Uptime</div>
-                    <div class="kpi-card-value">98.2%</div>
+                    <div class="kpi-card-label">MQTT Messages</div>
+                    <div class="kpi-card-value" id="ov-msgs" style="color:var(--accent-cyan)">—</div>
                 </div>
                 <div class="kpi-card">
                     <div class="kpi-card-label">Active Alerts</div>
-                    <div class="kpi-card-value" style="color: var(--accent-amber)">1</div>
+                    <div class="kpi-card-value" id="ov-alerts">—</div>
                 </div>
             </div>
 
+            <!-- Asset status cards -->
             <h2 class="section-title">Asset Status</h2>
             <div class="asset-grid">
-                ${assets.map(asset => `
+                ${assetDefs.map(a => `
                     <div class="asset-status-card" onclick="navigateToPage('live')">
                         <div class="asset-status-header">
-                            <div class="asset-status-name">${asset.name}</div>
-                            <span class="status-badge ${asset.status}">${asset.status}</span>
+                            <div class="asset-status-name">${a.label}</div>
+                            <span class="status-badge warning" id="ov-badge-${a.id}">Initializing</span>
                         </div>
-                        <p style="color: var(--text-muted); font-size: 13px; margin-top: 8px;">
-                            Click to view in Live Twin
+                        <p style="color:var(--text-muted);font-size:13px;margin:6px 0 2px">${a.zone}</p>
+                        <p style="color:var(--text-muted);font-size:12px">
+                            Last data: <span id="ov-lastseen-${a.id}" style="color:var(--text-secondary)">No data yet</span>
                         </p>
                     </div>
                 `).join('')}
             </div>
 
+            <!-- Recent activity (live) -->
             <h2 class="section-title">Recent Activity</h2>
-            <div class="activity-log">
-                ${activities.map(act => `
-                    <div class="activity-item">
-                        <span class="activity-time">${act.time}</span>
-                        <span class="activity-text">${act.text}</span>
-                    </div>
-                `).join('')}
+            <div class="activity-log" id="ov-activity-log">
+                <div class="activity-item">
+                    <span class="activity-text" style="color:var(--text-muted)">Waiting for MQTT data...</span>
+                </div>
             </div>
         </div>
     `;
+
+    // Immediate fill + start live refresh
+    _refreshOverviewDynamic();
 }
 
 function renderAnalyticsPage() {
     const page = document.getElementById('page-analytics');
-    
+
+    // ── Real model metrics extracted from notebooks ──────────────────
     const models = [
-        { name: 'CNC Failure Predictor', asset: 'A1', type: 'Classification', version: 'v1.2.0', lastTrained: '2024-07-20', status: 'Active' },
-        { name: 'Hydraulic Condition Monitor', asset: 'A2', type: 'Multi-target', version: 'v2.0.1', lastTrained: '2024-07-18', status: 'Active' },
-        { name: 'APU Anomaly Detector', asset: 'A3', type: 'Anomaly Detection', version: 'v1.0.0', lastTrained: '2024-07-22', status: 'Active' }
+        {
+            name: 'CNC Failure Predictor',
+            asset: 'A1', color: 'var(--a1-color)',
+            type: 'Binary Classification',
+            algo: 'XGBoost',
+            dataset: 'AI4I 2020 (10 000 samples)',
+            accuracy: '—', f1: '—', precision: '—', recall: '—',
+            note: 'Notebook outputs not recorded — re-run A1_ML notebook to populate metrics',
+            status: 'active',
+        },
+        {
+            name: 'Hydraulic Condition Monitor',
+            asset: 'A2', color: 'var(--a2-color)',
+            type: 'Multi-target Classification',
+            algo: 'XGBoost (4 targets)',
+            dataset: 'ZeMA Hydraulic (2 205 samples)',
+            accuracy: 'Cooler 100% / Valve 98.9% / Pump 99.6% / Accum. 100%',
+            f1: 'Cooler 100% / Valve 98.7% / Pump 99.6% / Accum. 100%',
+            precision: '99–100%', recall: '99–100%',
+            note: 'All 4 targets pass validation (≥98% macro-F1)',
+            status: 'active',
+        },
+        {
+            name: 'APU Anomaly Detector',
+            asset: 'A3', color: 'var(--a3-color)',
+            type: 'Unsupervised Anomaly Detection',
+            algo: 'Isolation Forest + LSTM Autoencoder (Ensemble)',
+            dataset: 'MetroPT-3 APU (1 516 948 samples)',
+            accuracy: '4/4 failure windows detected',
+            f1: '52.2% @ 96th-percentile threshold',
+            precision: '49.3%', recall: '55.4%',
+            note: 'Best ensemble threshold: 96th percentile. All 4 historical failure windows detected.',
+            status: 'active',
+        },
     ];
+
+    // Live MQTT telemetry values read from DOM
+    const liveA1  = document.getElementById('a1-prob')?.textContent  || '—';
+    const liveA2c = document.getElementById('a2-cooler')?.textContent || '—';
+    const liveA2v = document.getElementById('a2-valve')?.textContent  || '—';
+    const liveA3  = document.getElementById('a3-score')?.textContent  || '—';
 
     page.innerHTML = `
         <div class="page-container">
             <h1 class="page-title">Analytics</h1>
-            
+
+            <!-- Live inference KPIs -->
+            <h2 class="section-title">Live Inference Values</h2>
+            <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A1 — Failure Prob.</div>
+                    <div class="kpi-card-value" style="color:var(--a1-color);font-size:22px">${liveA1}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A2 — Cooler</div>
+                    <div class="kpi-card-value" style="color:var(--a2-color);font-size:22px">${liveA2c}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A2 — Valve</div>
+                    <div class="kpi-card-value" style="color:var(--a2-color);font-size:22px">${liveA2v}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-card-label">A3 — Anomaly Score</div>
+                    <div class="kpi-card-value" style="color:var(--a3-color);font-size:22px">${liveA3}</div>
+                </div>
+            </div>
+
+            <!-- Model registry -->
             <h2 class="section-title">Model Registry</h2>
             <table class="model-table">
                 <thead>
                     <tr>
-                        <th>Model Name</th>
+                        <th>Model</th>
                         <th>Asset</th>
-                        <th>Type</th>
-                        <th>Version</th>
-                        <th>Last Trained</th>
+                        <th>Algorithm</th>
+                        <th>Dataset</th>
+                        <th>Accuracy</th>
+                        <th>Macro F1</th>
                         <th>Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${models.map(m => `
                         <tr>
-                            <td style="font-weight: 600;">${m.name}</td>
+                            <td style="font-weight:600;color:${m.color}">${m.name}</td>
                             <td>${m.asset}</td>
-                            <td>${m.type}</td>
-                            <td><code>${m.version}</code></td>
-                            <td>${m.lastTrained}</td>
+                            <td>${m.algo}</td>
+                            <td style="font-size:12px;color:var(--text-muted)">${m.dataset}</td>
+                            <td style="font-size:12px">${m.accuracy}</td>
+                            <td style="font-size:12px">${m.f1}</td>
                             <td><span class="status-badge healthy">${m.status}</span></td>
                         </tr>
                     `).join('')}
                 </tbody>
             </table>
 
-            <h2 class="section-title">Model Performance</h2>
-            <div class="kpi-grid">
-                <div class="kpi-card">
-                    <div class="kpi-card-label">Average Accuracy</div>
-                    <div class="kpi-card-value">96.8%</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-card-label">Precision (Macro)</div>
-                    <div class="kpi-card-value">95.2%</div>
-                </div>
-                <div class="kpi-card">
-                    <div class="kpi-card-label">F1 Score (Macro)</div>
-                    <div class="kpi-card-value">94.9%</div>
-                </div>
+            <!-- Per-model detail cards -->
+            <h2 class="section-title">Model Details</h2>
+            <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px">
+                ${models.map(m => `
+                    <div class="kpi-card" style="border-left:3px solid ${m.color}">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                            <div>
+                                <span style="font-weight:600;color:${m.color};font-size:15px">${m.name}</span>
+                                <span style="margin-left:10px;font-size:12px;color:var(--text-muted)">${m.type}</span>
+                            </div>
+                            <span class="status-badge healthy">Active</span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:10px">
+                            <div>
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Accuracy</div>
+                                <div style="font-size:13px;font-weight:600;font-family:var(--font-mono)">${m.accuracy}</div>
+                            </div>
+                            <div>
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Macro F1</div>
+                                <div style="font-size:13px;font-weight:600;font-family:var(--font-mono)">${m.f1}</div>
+                            </div>
+                            <div>
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Precision</div>
+                                <div style="font-size:13px;font-weight:600;font-family:var(--font-mono)">${m.precision}</div>
+                            </div>
+                            <div>
+                                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Recall</div>
+                                <div style="font-size:13px;font-weight:600;font-family:var(--font-mono)">${m.recall}</div>
+                            </div>
+                        </div>
+                        <div style="font-size:12px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:8px">
+                            ℹ ${m.note}
+                        </div>
+                    </div>
+                `).join('')}
             </div>
         </div>
     `;
@@ -1462,6 +1635,7 @@ function onConnect() {
         console.log('%c✓ MQTT Connected', 'color:#00e676;font-weight:bold');
         mqttBadge.className = 'conn-badge live';
         mqttText.textContent = 'Live';
+        _logEvent('MQTT broker connected', 'info');
 
         client.subscribe('jesa/site1/workshop/milling/A1/#');
         client.subscribe('jesa/site1/workshop/hydraulics/A2/#');
@@ -1472,6 +1646,7 @@ function onFailure(err) {
     console.error('MQTT failed:', err.errorMessage);
     mqttBadge.className = 'conn-badge offline';
     mqttText.textContent = 'Offline';
+    _logEvent('MQTT connection failed: ' + err.errorMessage, 'critical');
 }
 
 function onConnectionLost(resp) {
@@ -1479,6 +1654,7 @@ function onConnectionLost(resp) {
         console.warn('MQTT lost:', resp.errorMessage);
         mqttBadge.className = 'conn-badge offline';
         mqttText.textContent = 'Offline';
+        _logEvent('MQTT connection lost', 'warning');
     }
 }
 
@@ -1552,6 +1728,11 @@ setInterval(() => {
     document.getElementById('uptime').textContent = m + ':' + s;
 }, 1000);
 
+// Refresh overview KPIs every second when on that page
+setInterval(() => {
+    if (currentPage === 'overview') _refreshOverviewDynamic();
+}, 1000);
+
 setInterval(refreshTelemetryHealth, 2000);
 
 // =====================================================================
@@ -1586,6 +1767,7 @@ function onMessageArrived(message) {
                 setCardGlow('card-a1', 'asset-card critical-glow');
                 setAssetGlow('A1', COLORS.critical);
                 document.getElementById('a1-bar').style.background = 'linear-gradient(90deg, #ff1744, #ff5252)';
+                _logEvent(`A1 — Machine FAILURE detected (prob: ${prob}%)`, 'critical');
             } else {
                 document.getElementById('a1-status').textContent = 'HEALTHY';
                 document.getElementById('a1-status').className = 'gauge-value good';
@@ -1594,6 +1776,7 @@ function onMessageArrived(message) {
                 setCardGlow('card-a1', 'asset-card healthy-glow');
                 setAssetGlow('A1', COLORS.good);
                 document.getElementById('a1-bar').style.background = 'linear-gradient(90deg, var(--a1-color), #6c9bff)';
+                _logEvent(`A1 — Failure probability updated: ${prob}%`, 'info');
             }
             // ── Viz ring buffer push ──
             _vizPush(vizData.A1.failureProb, parseFloat(prob) || 0);
@@ -1613,6 +1796,7 @@ function onMessageArrived(message) {
             setChip('a2-chip', cls.charAt(0).toUpperCase() + cls.slice(1), cls);
             setCardGlow('card-a2', 'asset-card ' + cls + '-glow');
             setAssetGlow('A2', COLORS[state]);
+            _logEvent(`A2 — Cooler condition: ${txt} (${v}%)`, state === 'good' ? 'info' : state);
             // ── Viz ring buffer push ──
             _vizPush(vizData.A2.cooler,     Number(v) || 0);
             _vizPush(vizData.A2.timestamps, _vizTimestamp());
@@ -1623,6 +1807,7 @@ function onMessageArrived(message) {
             if (v < 80) state = 'critical';
             document.getElementById('a2-valve').textContent = v + '%';
             document.getElementById('a2-valve').className = 'gauge-value mono ' + state;
+            _logEvent(`A2 — Valve health: ${v}%`, state === 'good' ? 'info' : state);
             // ── Viz ring buffer push ──
             _vizPush(vizData.A2.valve, Number(v) || 0);
         }
@@ -1642,6 +1827,7 @@ function onMessageArrived(message) {
                 setAssetGlow('A3', COLORS.critical);
                 a3Vibration = 0.4;
                 document.getElementById('a3-bar').style.background = 'linear-gradient(90deg, #ff1744, #ff5252)';
+                _logEvent(`A3 — ANOMALY detected (score: ${score})`, 'critical');
             } else {
                 document.getElementById('a3-status').textContent = 'NORMAL';
                 document.getElementById('a3-status').className = 'gauge-value good';

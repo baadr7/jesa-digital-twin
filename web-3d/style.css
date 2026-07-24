@@ -46,6 +46,24 @@ html, body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* ── Fixed Header (visible on all pages) ──────────────────────── */
+#fixed-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 15;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    background: var(--bg-card);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    box-shadow: var(--shadow-card);
+}
+
 /* ── Hamburger Button ──────────────────────────────────────────── */
 .hamburger-btn {
     background: transparent;
@@ -498,6 +516,21 @@ html, body {
 /* ── Top Bar ──────────────────────────────────────────────────── */
 #top-bar {
     display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-card);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px 24px;
+    box-shadow: var(--shadow-card);
+    animation: slideDown 0.6s ease-out;
+}
+
+#top-bar-live {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 80px;
     background: var(--bg-card);
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);

@@ -26,6 +26,23 @@
     </script>
 </head>
 <body>
+    <!-- Fixed Header (visible on all pages) -->
+    <header id="fixed-header">
+        <button id="hamburger-btn" class="hamburger-btn">☰</button>
+        <div class="brand">
+            <div class="brand-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#brandGrad)" stroke-width="2">
+                    <defs><linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00e5ff"/><stop offset="100%" stop-color="#7b61ff"/></linearGradient></defs>
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+                </svg>
+            </div>
+            <div>
+                <h1>JESA Digital Twin</h1>
+                <span class="brand-sub">Industry 4.0 — Predictive Maintenance</span>
+            </div>
+        </div>
+    </header>
+
     <!-- Sidebar Overlay -->
     <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
@@ -56,22 +73,8 @@
 
     <!-- UI Overlay (only visible on Live Twin) -->
     <div id="ui-overlay">
-        <!-- Top Bar -->
-        <header id="top-bar">
-            <!-- Hamburger Button -->
-            <button id="hamburger-btn" class="hamburger-btn">☰</button>
-            <div class="brand">
-                <div class="brand-icon">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#brandGrad)" stroke-width="2">
-                        <defs><linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#00e5ff"/><stop offset="100%" stop-color="#7b61ff"/></linearGradient></defs>
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
-                    </svg>
-                </div>
-                <div>
-                    <h1>JESA Digital Twin</h1>
-                    <span class="brand-sub">Industry 4.0 — Predictive Maintenance</span>
-                </div>
-            </div>
+        <!-- Top Bar (Live Twin only, with extra controls) -->
+        <header id="top-bar-live">
             <div class="top-bar-right">
                 <div class="kpi-mini">
                     <span class="kpi-mini-label">Assets Online</span>

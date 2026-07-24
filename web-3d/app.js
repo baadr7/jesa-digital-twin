@@ -207,7 +207,7 @@ const documentationMarkdown = `
 
 Welcome to the JESA Digital Twin technical documentation.
 
-## System Architecture
+## <a id="architecture">System Architecture</a>
 
 The JESA Digital Twin system consists of three main components:
 
@@ -215,7 +215,7 @@ The JESA Digital Twin system consists of three main components:
 2. **MQTT Data Pipeline**: Real-time data ingestion from sensors and edge devices
 3. **Analytics Backend**: Machine learning models for predictive maintenance and anomaly detection
 
-## Sensor / Asset Reference
+## <a id="assets">Sensor / Asset Reference</a>
 
 ### Asset A1: CNC Milling Machine
 - **Location**: Workshop Zone 1
@@ -232,7 +232,7 @@ The JESA Digital Twin system consists of three main components:
 - **Sensors**: Vibration, Acoustic Emission
 - **Data Frequency**: 200 Hz
 
-## MQTT Topic Schema
+## <a id="mqtt">MQTT Topic Schema</a>
 
 \`\`\`
 jesa/
@@ -258,7 +258,7 @@ jesa/
                     └── anomaly
 \`\`\`
 
-## Alert Thresholds & Definitions
+## <a id="alerts">Alert Thresholds & Definitions</a>
 
 | Alert Level | Failure Probability | Anomaly Score |
 |-------------|---------------------|---------------|
@@ -266,7 +266,7 @@ jesa/
 | Warning     | 5% - 20%            | 0.4 - 0.7     |
 | Critical    | > 20%               | > 0.7         |
 
-## Troubleshooting
+## <a id="troubleshooting">Troubleshooting</a>
 
 ### MQTT Connection Issues
 
@@ -325,6 +325,18 @@ function renderDocumentationPage() {
         item.addEventListener('click', () => {
             tocItems.forEach(i => i.classList.remove('active'));
             item.classList.add('active');
+
+            const section = item.dataset.section;
+            if (section === 'all') {
+                // Scroll to top
+                const docsContent = document.getElementById('docs-content');
+                docsContent.scrollTop = 0;
+            } else {
+                const targetElement = document.getElementById(section);
+                if (targetElement) {
+                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
         });
     });
 }

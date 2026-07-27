@@ -576,9 +576,9 @@ function _vizInitCharts() {
         _vizCharts.a1 = new Chart(get('viz-chart-a1'), cfg);
     }
 
-    // A2 — Cooler & Valve (multi-series)
+    // A2 — Cooler & Valve (multi-series) — values are health % (mapped from ZeMA classes)
     if (get('viz-chart-a2')) {
-        const cfg = _vizMultiChartDefaults([a2cColor, a2vColor], ['Cooler', 'Valve'], '%');
+        const cfg = _vizMultiChartDefaults([a2cColor, a2vColor], ['Cooler health', 'Valve health'], '%');
         cfg.options.scales.y.min = 0; cfg.options.scales.y.max = 100;
         cfg.data.labels              = [...vizData.A2.timestamps];
         cfg.data.datasets[0].data    = [...vizData.A2.cooler];
@@ -722,7 +722,7 @@ function renderVisualisationPage() {
                         </div>
                         <div class="chart-stat">
                             <span class="chart-stat-label">Threshold</span>
-                            <span class="chart-stat-value">0.400</span>
+                            <span class="chart-stat-value">0.347</span>
                         </div>
                     </div>
                 </div>
@@ -799,12 +799,12 @@ function _refreshAnalyticsDynamic() {
     if (vizData.A2.cooler.length) {
         const v = vizData.A2.cooler.at(-1);
         setEl('an-kpi-a2c', v.toFixed(0) + '%');
-        setStyle('an-kpi-a2c', 'color', v < 20 ? 'var(--accent-red)' : v < 100 ? 'var(--accent-amber)' : 'var(--a2-color)');
+        setStyle('an-kpi-a2c', 'color', v < 30 ? 'var(--accent-red)' : v < 80 ? 'var(--accent-amber)' : 'var(--a2-color)');
     }
     if (vizData.A2.valve.length) {
         const v = vizData.A2.valve.at(-1);
         setEl('an-kpi-a2v', v.toFixed(0) + '%');
-        setStyle('an-kpi-a2v', 'color', v < 80 ? 'var(--accent-red)' : v < 90 ? 'var(--accent-amber)' : 'var(--a2-color)');
+        setStyle('an-kpi-a2v', 'color', v < 30 ? 'var(--accent-red)' : v < 80 ? 'var(--accent-amber)' : 'var(--a2-color)');
     }
     if (vizData.A3.anomalyScore.length) {
         const v = vizData.A3.anomalyScore.at(-1);
@@ -923,7 +923,7 @@ function renderAnalyticsPage() {
             accuracy: '4/4 failure windows detected',
             f1: '52.2% @ 96th-percentile threshold',
             precision: '49.3%', recall: '55.4%',
-            note: 'Best ensemble threshold: 96th percentile. All 4 historical failure windows detected.',
+            note: 'Best ensemble threshold: 96th percentile (0.347). All 4 historical failure windows detected.',
             status: 'active',
         },
     ];
@@ -946,11 +946,11 @@ function renderAnalyticsPage() {
                     <div class="kpi-card-value" id="an-kpi-a1" style="color:var(--a1-color);font-size:22px">${liveA1}</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-card-label">A2 — Cooler</div>
+                    <div class="kpi-card-label">A2 — Cooler health</div>
                     <div class="kpi-card-value" id="an-kpi-a2c" style="color:var(--a2-color);font-size:22px">${liveA2c}</div>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-card-label">A2 — Valve</div>
+                    <div class="kpi-card-label">A2 — Valve health</div>
                     <div class="kpi-card-value" id="an-kpi-a2v" style="color:var(--a2-color);font-size:22px">${liveA2v}</div>
                 </div>
                 <div class="kpi-card">
@@ -1298,16 +1298,27 @@ scene.add(particles);
 // =====================================================================
 //  MATERIALS LIBRARY
 // =====================================================================
+//  MATERIALS LIBRARY
+//  Each factory fn registers the created material in _allMaterials
+//  so applyTheme() can recolor them precisely.
+// =====================================================================
+const _allMaterials = []; // { mat, darkColor, lightColor, type }
+
+function _reg(mat, darkColor, lightColor) {
+    _allMaterials.push({ mat, darkColor, lightColor });
+    return mat;
+}
+
 const MAT = {
-    body:   () => new THREE.MeshStandardMaterial({ color: 0x3a4055, metalness: 0.7, roughness: 0.35 }),
-    panel:  () => new THREE.MeshStandardMaterial({ color: 0x2a2e3e, metalness: 0.3, roughness: 0.6 }),
-    dark:   () => new THREE.MeshStandardMaterial({ color: 0x1a1e2a, metalness: 0.5, roughness: 0.5 }),
-    accent: (c) => new THREE.MeshStandardMaterial({ color: c, metalness: 0.2, roughness: 0.3 }),
-    glow:   (c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.9, metalness: 0.1, roughness: 0.2 }),
-    glass:  () => new THREE.MeshStandardMaterial({ color: 0x1a3050, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.4 }),
-    chrome: () => new THREE.MeshStandardMaterial({ color: 0x888899, metalness: 0.95, roughness: 0.08 }),
-    rubber: () => new THREE.MeshStandardMaterial({ color: 0x151515, metalness: 0.0, roughness: 0.95 }),
-    pipe:   (c) => new THREE.MeshStandardMaterial({ color: c || 0x556677, metalness: 0.6, roughness: 0.3 }),
+    body:   ()  => _reg(new THREE.MeshStandardMaterial({ color: 0x3a4055, metalness: 0.7, roughness: 0.35 }), 0x3a4055, 0xd0d0d0),
+    panel:  ()  => _reg(new THREE.MeshStandardMaterial({ color: 0x2a2e3e, metalness: 0.3, roughness: 0.6  }), 0x2a2e3e, 0xb8b8b8),
+    dark:   ()  => _reg(new THREE.MeshStandardMaterial({ color: 0x1a1e2a, metalness: 0.5, roughness: 0.5  }), 0x1a1e2a, 0x999999),
+    accent: (c) => _reg(new THREE.MeshStandardMaterial({ color: c,        metalness: 0.2, roughness: 0.3  }), c, c),
+    glow:   (c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.9, metalness: 0.1, roughness: 0.2 }), // glow never recolored
+    glass:  ()  => _reg(new THREE.MeshStandardMaterial({ color: 0x1a3050, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.4 }), 0x1a3050, 0xc8d8e8),
+    chrome: ()  => _reg(new THREE.MeshStandardMaterial({ color: 0x888899, metalness: 0.95, roughness: 0.08 }), 0x888899, 0xe0e0e0),
+    rubber: ()  => _reg(new THREE.MeshStandardMaterial({ color: 0x151515, metalness: 0.0, roughness: 0.95 }), 0x151515, 0x888888),
+    pipe:   (c) => _reg(new THREE.MeshStandardMaterial({ color: c || 0x556677, metalness: 0.6, roughness: 0.3 }), c || 0x556677, 0xbbbbbb),
 };
 
 const COLORS = {
@@ -1887,32 +1898,57 @@ function onMessageArrived(message) {
         }
 
         // ── A2 Hydraulics ──
-        else if (topic.includes('/A2/analytics/cooler_condition') || topic.includes('/A2/condition/cooler_condition_pct')) {
-            let state, txt, cls;
-            if (v === 100)    { state = 'good';     txt = 'Optimal';   cls = 'healthy'; }
-            else if (v >= 20) { state = 'warning';  txt = 'Degraded';  cls = 'warning'; }
-            else              { state = 'critical'; txt = 'Failure';   cls = 'critical'; }
-
-            document.getElementById('a2-cooler').textContent = txt + ' (' + v + '%)';
-            document.getElementById('a2-cooler').className = 'gauge-value ' + state;
-            document.getElementById('a2-bar').style.width = v + '%';
-            setChip('a2-chip', cls.charAt(0).toUpperCase() + cls.slice(1), cls);
-            setCardGlow('card-a2', 'asset-card ' + cls + '-glow');
-            setAssetGlow('A2', COLORS[state]);
-            _logEvent(`A2 — Cooler condition: ${txt} (${v}%)`, state === 'good' ? 'info' : state);
-            // ── Viz ring buffer push ──
-            _vizPush(vizData.A2.cooler,     Number(v) || 0);
+        // ZeMA dataset classes:
+        //   cooler: 100=full, 20=partial, 3=near-failure, 0=failed
+        //   valve:  100=optimal, 90=small lag, 80=severe lag, 73=close to total failure
+        //   pump:   0=no leak, 1=weak leak, 2=severe leak
+        //   accum.: 130=optimal, 115=slightly reduced, 100=severely reduced, 90=close to failure
+        else if (topic.includes('/A2/analytics/cooler_condition')) {
+            // Map class → health % and label
+            const coolerMap = { 100: { pct: 100, txt: 'Optimal',      cls: 'healthy'  },
+                                  20: { pct:  60, txt: 'Partial',      cls: 'warning'  },
+                                   3: { pct:  20, txt: 'Near-Failure', cls: 'critical' },
+                                   0: { pct:   0, txt: 'Failed',       cls: 'critical' } };
+            const cm = coolerMap[v] ?? { pct: 0, txt: 'Unknown', cls: 'warning' };
+            document.getElementById('a2-cooler').textContent = cm.txt + ' (class ' + v + ')';
+            document.getElementById('a2-cooler').className = 'gauge-value ' + cm.cls;
+            document.getElementById('a2-bar').style.width = cm.pct + '%';
+            setChip('a2-chip', cm.cls.charAt(0).toUpperCase() + cm.cls.slice(1), cm.cls);
+            setCardGlow('card-a2', 'asset-card ' + cm.cls + '-glow');
+            setAssetGlow('A2', COLORS[cm.cls === 'healthy' ? 'good' : cm.cls]);
+            _logEvent(`A2 — Cooler: ${cm.txt} (class ${v})`, cm.cls === 'healthy' ? 'info' : cm.cls);
+            // ── Viz ring buffer push — use health % for chart ──
+            _vizPush(vizData.A2.cooler,     cm.pct);
             _vizPush(vizData.A2.timestamps, _vizTimestamp());
         }
-        else if (topic.includes('/A2/analytics/valve_condition') || topic.includes('/A2/condition/valve_condition_pct')) {
-            let state = 'good';
-            if (v < 90) state = 'warning';
-            if (v < 80) state = 'critical';
-            document.getElementById('a2-valve').textContent = v + '%';
-            document.getElementById('a2-valve').className = 'gauge-value mono ' + state;
-            _logEvent(`A2 — Valve health: ${v}%`, state === 'good' ? 'info' : state);
-            // ── Viz ring buffer push ──
-            _vizPush(vizData.A2.valve, Number(v) || 0);
+        else if (topic.includes('/A2/analytics/valve_condition')) {
+            // Map class → health %
+            const valveMap = { 100: { pct: 100, txt: 'Optimal' },
+                                90: { pct:  85, txt: 'Small lag' },
+                                80: { pct:  50, txt: 'Severe lag' },
+                                73: { pct:  20, txt: 'Near-failure' } };
+            const vm = valveMap[v] ?? { pct: Math.min(v, 100), txt: 'Class ' + v };
+            const vstate = vm.pct >= 90 ? 'good' : vm.pct >= 50 ? 'warning' : 'critical';
+            document.getElementById('a2-valve').textContent = vm.txt + ' (class ' + v + ')';
+            document.getElementById('a2-valve').className = 'gauge-value mono ' + vstate;
+            _logEvent(`A2 — Valve: ${vm.txt} (class ${v})`, vstate === 'good' ? 'info' : vstate);
+            // ── Viz ring buffer push — use health % ──
+            _vizPush(vizData.A2.valve, vm.pct);
+        }
+        else if (topic.includes('/A2/analytics/pump_leakage')) {
+            const pumpMap = { 0: { txt: 'No leak',      cls: 'good'     },
+                              1: { txt: 'Weak leak',    cls: 'warning'  },
+                              2: { txt: 'Severe leak',  cls: 'critical' } };
+            const pm = pumpMap[v] ?? { txt: 'Unknown', cls: 'warning' };
+            _logEvent(`A2 — Pump: ${pm.txt} (class ${v})`, pm.cls === 'good' ? 'info' : pm.cls);
+        }
+        else if (topic.includes('/A2/analytics/accumulator_pressure')) {
+            const accMap = { 130: { txt: 'Optimal',          cls: 'good'     },
+                             115: { txt: 'Slightly reduced',  cls: 'warning'  },
+                             100: { txt: 'Severely reduced',  cls: 'critical' },
+                              90: { txt: 'Near-failure',      cls: 'critical' } };
+            const am = accMap[v] ?? { txt: 'Unknown', cls: 'warning' };
+            _logEvent(`A2 — Accumulator: ${am.txt} (class ${v})`, am.cls === 'good' ? 'info' : am.cls);
         }
 
         // ── A3 APU Compressor ──
@@ -1947,7 +1983,10 @@ function onMessageArrived(message) {
             _vizPush(vizData.A3.timestamps,   _vizTimestamp());
         }
 
-        // Live-refresh visualisation page on every message
+        // ── A1 per-mode predictions — update detail panel if open ──
+        if (topic.includes('/A1/analytics/mode_')) {
+            if (_currentDetailAsset === 'A1') refreshDetailPanel();
+        }
         if (currentPage === 'visualisation') _vizRefreshCharts();
 
         // Live-refresh analytics KPI strip on every message
@@ -2034,6 +2073,85 @@ document.getElementById('reconnect-mqtt').addEventListener('click', () => {
 
 // Initialize navigation
 initNavigation();
+
+// =====================================================================
+//  THEME TOGGLE — Dark / Light mode
+//  Placed after scene + ground + _vizCharts are all defined.
+// =====================================================================
+(function initTheme() {
+    const STORAGE_KEY = 'jesa-theme';
+    const root        = document.documentElement;
+    const btn         = document.getElementById('theme-toggle');
+
+    function applyTheme(theme) {
+        // 1. Drive every CSS variable on the page
+        root.setAttribute('data-theme', theme);
+
+        const isDark = theme === 'dark';
+
+        // 2. Three.js — scene background + fog + ground
+        scene.background.set(isDark ? 0x0f172a : 0xf5f0e8);
+        if (scene.fog) {
+            scene.fog.color.set(isDark ? 0x0f172a : 0xf5f0e8);
+            scene.fog.density = isDark ? 0.008 : 0.004;
+        }
+        if (ground) {
+            ground.material.color.set(isDark ? 0x0f172a : 0xe8e0d0); // beige sol
+            ground.material.roughness = isDark ? 0.85 : 0.95;
+        }
+        if (grid) grid.material.opacity = isDark ? 0.12 : 0.18;
+
+        // Bloom off in light mode
+        bloom.strength           = isDark ? 0.7  : 0.0;
+        bloom.threshold          = isDark ? 0.35 : 1.0;
+        renderer.toneMappingExposure = isDark ? 1.1 : 1.0;
+
+        // 3. Recolor all registered materials — precise 1:1 mapping, no guessing
+        for (const { mat, darkColor, lightColor } of _allMaterials) {
+            mat.color.set(isDark ? darkColor : lightColor);
+        }
+
+        // 4. Lighting
+        scene.traverse(obj => {
+            if (obj.isAmbientLight)     obj.intensity = isDark ? 1.2 : 4.0;
+            if (obj.isDirectionalLight) obj.intensity = isDark ? 2.5 : 3.5;
+            if (obj.isPointLight)       obj.intensity = isDark ? (obj._base ?? obj.intensity) : 0.3;
+            if (obj.isPointLight && obj._base === undefined) obj._base = obj.intensity;
+        });
+
+        // 5. Chart.js — update tick/grid colors on any live charts
+        const tickColor = isDark ? '#64748b' : '#94a3b8';
+        const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.07)';
+        Object.values(_vizCharts).forEach(chart => {
+            ['x', 'y'].forEach(axis => {
+                if (chart.options.scales[axis]) {
+                    chart.options.scales[axis].ticks.color = tickColor;
+                    chart.options.scales[axis].grid.color  = gridColor;
+                }
+            });
+            chart.update('none');
+        });
+    }
+
+    function toggle() {
+        const current = root.getAttribute('data-theme') || 'dark';
+        const next    = current === 'dark' ? 'light' : 'dark';
+        localStorage.setItem(STORAGE_KEY, next);
+        applyTheme(next);
+    }
+
+    // Boot: saved preference → OS preference → dark
+    const saved  = localStorage.getItem(STORAGE_KEY);
+    const osDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    applyTheme(saved ?? (osDark ? 'dark' : 'light'));
+
+    // Sync if OS theme changes and user has no saved preference
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+        if (!localStorage.getItem(STORAGE_KEY)) applyTheme(e.matches ? 'dark' : 'light');
+    });
+
+    btn.addEventListener('click', toggle);
+})();
 
 // Initialize asset detail panel handlers
 document.getElementById('close-detail-panel').addEventListener('click', closeAssetDetail);

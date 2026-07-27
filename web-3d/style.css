@@ -9,33 +9,72 @@
     margin: 0; padding: 0; box-sizing: border-box;
 }
 
+/* ── Design tokens — shared (theme-independent) ───────────────── */
 :root {
-    --bg-deep:      #0a0e1a;
-    --bg-card:      rgba(16, 21, 31, 0.95);
-    --bg-card-hover: rgba(16, 21, 31, 1);
-    --border:       rgba(255, 255, 255, 0.08);
-    --border-hover: rgba(255, 255, 255, 0.15);
-    --text-primary: #f1f5f9;
-    --text-secondary: #cbd5e1;
-    --text-muted:   #94a3b8;
-    --accent-cyan:  #00e5ff;
-    --accent-teal:  #14b8a6;
-    --accent-blue:  #3b82f6;
+    --accent-cyan:   #00e5ff;
+    --accent-teal:   #14b8a6;
+    --accent-blue:   #3b82f6;
     --accent-purple: #8b5cf6;
-    --accent-green: #10b981;
-    --accent-amber: #f59e0b;
-    --accent-red:   #ef4444;
-    --a1-color:     #3b82f6;
-    --a2-color:     #0ea5e9;
-    --a3-color:     #8b5cf6;
-    --radius-sm:    8px;
-    --radius-md:    12px;
-    --radius-lg:    16px;
-    --shadow-card:  0 8px 30px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.2);
-    --shadow-glow:  0 0 30px -5px;
-    --transition:   0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+    --accent-green:  #10b981;
+    --accent-amber:  #f59e0b;
+    --accent-red:    #ef4444;
+    --a1-color:      #3b82f6;
+    --a2-color:      #0ea5e9;
+    --a3-color:      #8b5cf6;
+    --radius-sm:     8px;
+    --radius-md:     12px;
+    --radius-lg:     16px;
+    --shadow-glow:   0 0 30px -5px;
+    --transition:    0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    --font-sans:     'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono:     'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ── Dark theme (default) ─────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+    --bg-deep:       #0a0e1a;
+    --bg-card:       rgba(16, 21, 31, 0.95);
+    --bg-card-hover: rgba(16, 21, 31, 1);
+    --bg-input:      rgba(0, 0, 0, 0.3);
+    --border:        rgba(255, 255, 255, 0.08);
+    --border-hover:  rgba(255, 255, 255, 0.15);
+    --text-primary:  #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted:    #94a3b8;
+    --shadow-card:   0 8px 30px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.2);
+    --gauge-block-bg: rgba(15, 23, 42, 0.5);
+    --gauge-block-border: rgba(255, 255, 255, 0.05);
+    --progress-track: rgba(255, 255, 255, 0.08);
+    --doc-pre-bg:    rgba(0, 0, 0, 0.5);
+    --doc-code-bg:   rgba(0, 0, 0, 0.4);
+    --cam-hint-bg:   rgba(0, 0, 0, 0.3);
+    --table-header-bg: rgba(0, 0, 0, 0.3);
+    --theme-icon-sun: 0;   /* sun opacity */
+    --theme-icon-moon: 1;  /* moon opacity */
+}
+
+/* ── Light theme ──────────────────────────────────────────────── */
+[data-theme="light"] {
+    --bg-deep:       #f0f4f8;
+    --bg-card:       rgba(255, 255, 255, 0.92);
+    --bg-card-hover: rgba(255, 255, 255, 1);
+    --bg-input:      rgba(0, 0, 0, 0.05);
+    --border:        rgba(0, 0, 0, 0.09);
+    --border-hover:  rgba(0, 0, 0, 0.18);
+    --text-primary:  #0f172a;
+    --text-secondary: #334155;
+    --text-muted:    #64748b;
+    --shadow-card:   0 4px 20px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.06);
+    --gauge-block-bg: rgba(241, 245, 249, 0.8);
+    --gauge-block-border: rgba(0, 0, 0, 0.07);
+    --progress-track: rgba(0, 0, 0, 0.08);
+    --doc-pre-bg:    rgba(0, 0, 0, 0.04);
+    --doc-code-bg:   rgba(0, 0, 0, 0.06);
+    --cam-hint-bg:   rgba(255, 255, 255, 0.6);
+    --table-header-bg: rgba(0, 0, 0, 0.04);
+    --theme-icon-sun: 1;
+    --theme-icon-moon: 0;
 }
 
 html, body {
@@ -44,6 +83,15 @@ html, body {
     background: var(--bg-deep);
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
+}
+
+/* Smooth theme transition on every element */
+*, *::before, *::after {
+    transition:
+        background-color 0.3s ease,
+        border-color     0.3s ease,
+        color            0.3s ease,
+        box-shadow       0.3s ease;
 }
 
 /* ── Fixed Header (visible on all pages) ──────────────────────── */
@@ -55,13 +103,92 @@ html, body {
     z-index: 15;
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
     background: var(--bg-card);
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
     border-bottom: 1px solid var(--border);
     padding: 14px 24px;
     box-shadow: var(--shadow-card);
+}
+
+/* ── Theme Toggle Button ───────────────────────────────────────── */
+.theme-toggle-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: auto;
+    /* override the global * transition — we handle this ourselves */
+    transition: border-color 0.3s ease, background 0.3s ease,
+                color 0.3s ease, transform 0.2s ease;
+}
+
+.theme-toggle-btn:hover {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    background: rgba(0, 229, 255, 0.08);
+    transform: scale(1.1) rotate(15deg);
+}
+
+.theme-toggle-btn:active {
+    transform: scale(0.95);
+}
+
+.theme-toggle-btn:focus-visible {
+    outline: 2px solid var(--accent-cyan);
+    outline-offset: 3px;
+}
+
+/* Both icons sit on top of each other, absolutely centered */
+.theme-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: block;
+    pointer-events: none;
+    /* Explicitly override the global * transition */
+    transition: opacity 0.25s ease, transform 0.3s ease !important;
+}
+
+/* Dark mode → sun visible (click to go light) */
+[data-theme="dark"]  .theme-icon-sun  {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
+}
+[data-theme="dark"]  .theme-icon-moon {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(90deg) scale(0.6);
+    pointer-events: none;
+}
+
+/* Light mode → moon visible (click to go dark) */
+[data-theme="light"] .theme-icon-moon {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
+}
+[data-theme="light"] .theme-icon-sun  {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(-90deg) scale(0.6);
+    pointer-events: none;
+}
+
+/* Before JS sets data-theme: hide sun, show moon */
+:root:not([data-theme]) .theme-icon-sun  {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(-90deg) scale(0.6);
+}
+:root:not([data-theme]) .theme-icon-moon {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
 }
 
 /* ── Hamburger Button ──────────────────────────────────────────── */
@@ -350,7 +477,7 @@ html, body {
 .docs-search {
     width: 100%;
     padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     color: var(--text-primary);
@@ -419,7 +546,7 @@ html, body {
 
 .docs-content code {
     font-family: var(--font-mono);
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--doc-code-bg);
     padding: 2px 6px;
     border-radius: 4px;
     color: var(--accent-cyan);
@@ -427,7 +554,7 @@ html, body {
 }
 
 .docs-content pre {
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--doc-pre-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 16px;
@@ -464,7 +591,7 @@ html, body {
 }
 
 .model-table th {
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--table-header-bg);
     padding: 14px 18px;
     text-align: left;
     font-size: 13px;
@@ -575,7 +702,7 @@ html, body {
 
 .control-btn {
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.7);
+    background: var(--bg-card);
     color: var(--text-primary);
     border-radius: 999px;
     padding: 9px 14px;
@@ -588,7 +715,7 @@ html, body {
 }
 
 .control-btn:hover {
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--bg-card-hover);
     border-color: var(--border-hover);
     transform: translateY(-1px);
 }
@@ -611,11 +738,12 @@ html, body {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 16px;
     border-radius: 20px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     font-size: 0.78rem; font-weight: 600;
     letter-spacing: 0.05em; text-transform: uppercase;
     transition: var(--transition);
+    color: var(--text-muted);
 }
 .conn-dot {
     width: 8px; height: 8px; border-radius: 50%;
@@ -727,9 +855,9 @@ html, body {
     font-size: 0.68rem; font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.05em;
     white-space: nowrap;
-    background: rgba(255,255,255,0.06);
+    background: var(--bg-input);
     color: var(--text-muted);
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
     transition: var(--transition);
 }
 .status-chip.healthy {
@@ -756,11 +884,11 @@ html, body {
     display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
 }
 .gauge-block {
-    background: rgba(15, 23, 42, 0.5);
+    background: var(--gauge-block-bg);
     border-radius: var(--radius-sm);
     padding: 10px 12px;
     display: flex; flex-direction: column; gap: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--gauge-block-border);
 }
 .gauge-label {
     font-size: 0.68rem; color: var(--text-muted);
@@ -779,7 +907,7 @@ html, body {
 /* Progress Bar */
 .progress-bar-track {
     height: 4px; border-radius: 2px;
-    background: rgba(255,255,255,0.08);
+    background: var(--progress-track);
     overflow: hidden;
 }
 .progress-bar-fill {
@@ -820,7 +948,7 @@ html, body {
     align-self: center;
     display: flex; gap: 20px;
     font-size: 0.7rem; color: var(--text-muted);
-    background: rgba(0,0,0,0.3);
+    background: var(--cam-hint-bg);
     backdrop-filter: blur(8px);
     padding: 6px 18px; border-radius: 20px;
     pointer-events: none;

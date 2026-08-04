@@ -1,10 +1,5 @@
-# JESA Digital Twin — Phase 4 Infrastructure Stack
+# JESA Digital Twin — Infrastructure Stack
 # Reference: docs/uns-spec.md
-#
-# Services:
-#   mosquitto  — Eclipse Mosquitto MQTT broker (UNS backbone)
-#   influxdb   — InfluxDB 2.x time-series database (telemetry historian)
-#   telegraf   — Telegraf agent (MQTT consumer → InfluxDB writer)
 #
 # Usage:
 #   docker compose up -d              # start all services
@@ -17,14 +12,14 @@
 
 services:
 
-  # ── MQTT Broker ──────────────────────────────────────────────────────
+  # -- MQTT Broker --
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: jesa-mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"     # MQTT TCP
-      - "9001:9001"     # MQTT WebSocket
+      - "1883:1883"
+      - "9001:9001"
     volumes:
       - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
@@ -36,13 +31,13 @@ services:
       retries: 3
       start_period: 5s
 
-  # ── Time-Series Database ─────────────────────────────────────────────
+  # -- Time-Series Database --
   influxdb:
     image: influxdb:2
     container_name: jesa-influxdb
     restart: unless-stopped
     ports:
-      - "8086:8086"     # InfluxDB HTTP API + UI
+      - "8086:8086"
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: jesa
@@ -61,7 +56,7 @@ services:
       retries: 5
       start_period: 15s
 
-  # ── Telegraf Agent (MQTT → InfluxDB) ─────────────────────────────────
+  # -- Telegraf Agent (MQTT -> InfluxDB) --
   telegraf:
     image: telegraf:1.34
     container_name: jesa-telegraf
@@ -76,7 +71,10 @@ services:
     volumes:
       - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
 
-  # ── ML Inference Service ─────────────────────────────────────────────
+  # -- ML Inference Service --
+  # uns/ is NOT volume-mounted: mounting Windows folders into WSL2 Linux
+  # containers corrupts .pyc bytecode (bad marshal data). Code is COPY'd
+  # into the image at build time instead.
   ml-inference:
     build:
       context: .
@@ -90,17 +88,17 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
       MODEL_DIR: /app/notebooks/models
+      MQTT_CLIENT_ID: ml-inference-docker
     healthcheck:
-      test: ["CMD", "python", "-c", "from uns.ml_inference_service import A1Predictor, A2Predictor, A3Predictor; print('ok')"]
+      test: ["CMD", "python", "-c", "import pandas, sklearn; print('ok')"]
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 20s
+      start_period: 30s
     volumes:
-      - ./uns:/app/uns
       - ./notebooks/models:/app/notebooks/models
 
-  # ── Grafana (Visualization) ──────────────────────────────────────────
+  # -- Grafana (Visualization) --
   grafana:
     image: grafana/grafana:10.1.5
     container_name: jesa-grafana

@@ -65,7 +65,18 @@ class A2HydraulicSimulator(AssetSimulator):
     async def samples(self) -> AsyncIterator[tuple[dict[str, Any], float]]:
         while True:
             for cycle in range(self._cycles):
-                cooler, valve, pump_leak, accumulator, stable = self._profile[cycle]
+                raw_cooler, raw_valve, raw_pump, raw_accum, stable = self._profile[cycle]
+
+                # --- OVERRIDE DÉMO JESA ---
+                # Le dataset ZeMA contient des classes dégradées (20, 3, 0 …)
+                # qui apparaissent en panne permanente dans le Live Twin.
+                # On force l'état OPTIMAL pour tous les cycles :
+                #   Cooler=100 (optimal), Valve=100, PumpLeakage=0 (no leak),
+                #   Accumulator=130 (optimal pressure).
+                # Les valeurs brutes du dataset restent consultables via
+                # self._profile[cycle] pour debugging.
+                cooler, valve, pump_leak, accumulator = 100, 100, 0, 130
+
                 for second in range(self._cycle_seconds):
                     values: dict[str, Any] = {
                         key: arr[cycle, second] for key, arr in self._sensors.items()

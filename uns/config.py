@@ -35,7 +35,7 @@ def _to_snake(name: str) -> str:
         KPIs                 → kpis
     """
     # Known acronyms that should stay as one token
-    ACRONYMS = {"KPIs": "kpis", "DVPressure": "dv_pressure"}
+    ACRONYMS = {"KPIs": "kpis", "DVPressure": "dv_pressure", "CoolingPower_kW": "cooling_power_kw"}
     for acr, repl in ACRONYMS.items():
         name = name.replace(acr, repl)
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)

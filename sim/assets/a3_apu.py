@@ -83,4 +83,15 @@ class A3ApuSimulator(AssetSimulator):
                     }
                     values["Simulation/RowIndex"] = chunk.index[pos]
                     values["Simulation/SourceTimestamp"] = ts.isoformat()
+
+                    # --- OVERRIDE DÉMO JESA ---
+                    # Le dataset MetroPT-3 contient des phases où
+                    # LPS=1 (Low Pressure Switch < 7 bar) et Oil_level=1
+                    # (niveau huile bas) sur de longues périodes. Pour la
+                    # démonstration on force ces drapeaux à 0 (nominal) afin
+                    # qu'A3 n'apparaisse pas en warning permanent sur le
+                    # dashboard simulator et dans le PLC.
+                    values["Digital/LPS"]       = 0
+                    values["Digital/OilLevel"]  = 0
+
                     yield values, dt

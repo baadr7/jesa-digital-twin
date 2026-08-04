@@ -266,28 +266,30 @@ function restorePanelScene() {
 let _currentDetailAsset = null;   // track which asset is open for live refresh
 
 function refreshDetailPanel() {
-    if (!_currentDetailAsset) return;
-    const setD = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    switch (_currentDetailAsset) {
-        case 'A1':
-            setD('detail-live-0', getTextContent('a1-status'));
-            setD('detail-live-1', getTextContent('a1-prob'));
-            setD('detail-live-2', getTextContent('a1-last'));
-            setD('detail-live-3', getTextContent('a1-chip'));
-            break;
-        case 'A2':
-            setD('detail-live-0', getTextContent('a2-cooler'));
-            setD('detail-live-1', getTextContent('a2-valve'));
-            setD('detail-live-2', getTextContent('a2-last'));
-            setD('detail-live-3', getTextContent('a2-chip'));
-            break;
-        case 'A3':
-            setD('detail-live-0', getTextContent('a3-status'));
-            setD('detail-live-1', getTextContent('a3-score'));
-            setD('detail-live-2', getTextContent('a3-last'));
-            setD('detail-live-3', getTextContent('a3-chip'));
-            break;
+    if (!_currentDetailAsset || !_dsbCurrent) return;
+
+    const layout = DSB_LAYOUT[_currentDetailAsset];
+    const L = dsbLatest[_currentDetailAsset] || {};
+    const statusFn = _DSB_STATUS_FN[_currentDetailAsset];
+    const { chips, tiles } = statusFn ? statusFn(L) : { chips: '', tiles: '' };
+
+    const panel = document.getElementById('asset-detail-panel');
+    const chipsEl = panel.querySelector('.dsb-chips');
+    if (chipsEl) chipsEl.innerHTML = chips;
+    const tilesEl = panel.querySelector('.dsb-tiles');
+    if (tilesEl) tilesEl.innerHTML = tiles;
+
+    // Update header connection badge (always on since UNS streams)
+    const conn = panel.querySelector('.dsb-conn');
+    if (conn) {
+        const ls = assetTelemetry[_currentDetailAsset]?.lastSeen || 0;
+        const ok = ls && Date.now() - ls <= STALE_MS[_currentDetailAsset];
+        conn.className = 'dsb-conn ' + (ok ? 'on' : 'off');
+        conn.textContent = ok ? '● LIVE' : '● NO DATA';
     }
+
+    // Redraw all charts
+    for (const c of _dsbCurrent.charts) c.render();
 }
 
 function openAssetDetail(assetId) {
@@ -295,129 +297,54 @@ function openAssetDetail(assetId) {
     const overlay = document.getElementById('asset-detail-overlay');
     const panel = document.getElementById('asset-detail-panel');
     const content = document.getElementById('detail-content');
-    
-    // Populate content
-    let title = '';
-    let description = '';
-    let details = [];
-    let performance = [];
-    let accentColor = '';
-    
-    switch(assetId) {
-        case 'A1':
-            title = 'A1 — CNC Milling Machine';
-            description = 'Precision CNC machining center for metal parts.';
-            accentColor = 'var(--a1-color)';
-            details = [
-                { label: 'Location', value: 'Workshop Zone 1' },
-                { label: 'Type', value: 'Vertical Machining Center' },
-                { label: 'Model', value: 'VMC-850' },
-                { label: 'Serial', value: 'VMC-2023-0042' },
-                { label: 'Install Date', value: '2023-06-15' }
-            ];
-            performance = [
-                { label: 'Machine Status', value: getTextContent('a1-status') },
-                { label: 'Failure Probability', value: getTextContent('a1-prob') },
-                { label: 'Last Update', value: getTextContent('a1-last') },
-                { label: 'Status', value: getTextContent('a1-chip') }
-            ];
-            break;
-        case 'A2':
-            title = 'A2 — Hydraulic System';
-            description = 'High-pressure hydraulic power unit for industrial machines.';
-            accentColor = 'var(--a2-color)';
-            details = [
-                { label: 'Location', value: 'Workshop Zone 1' },
-                { label: 'Type', value: 'Hydraulic Power Unit' },
-                { label: 'Model', value: 'HPU-200' },
-                { label: 'Serial', value: 'HPU-2023-0018' },
-                { label: 'Install Date', value: '2023-03-22' }
-            ];
-            performance = [
-                { label: 'Cooler Condition', value: getTextContent('a2-cooler') },
-                { label: 'Valve Health', value: getTextContent('a2-valve') },
-                { label: 'Last Update', value: getTextContent('a2-last') },
-                { label: 'Status', value: getTextContent('a2-chip') }
-            ];
-            break;
-        case 'A3':
-            title = 'A3 — APU Compressor';
-            description = 'Air compressor unit for pneumatic systems and tools.';
-            accentColor = 'var(--a3-color)';
-            details = [
-                { label: 'Location', value: 'Workshop Zone 2' },
-                { label: 'Type', value: 'Rotary Screw Compressor' },
-                { label: 'Model', value: 'RSC-150' },
-                { label: 'Serial', value: 'RSC-2023-0076' },
-                { label: 'Install Date', value: '2023-09-08' }
-            ];
-            performance = [
-                { label: 'Anomaly Status', value: getTextContent('a3-status') },
-                { label: 'Anomaly Score', value: getTextContent('a3-score') },
-                { label: 'Last Update', value: getTextContent('a3-last') },
-                { label: 'Status', value: getTextContent('a3-chip') }
-            ];
-            break;
-    }
-    
-    // Build HTML with matching asset card style
-    let html = `
-        <style>
-            .detail-header {
-                display: flex;
-                gap: 12px;
-                margin-bottom: 16px;
-            }
-            .detail-icon {
-                width: 40px;
-                height: 40px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                border-radius: var(--radius-sm);
-                border: 1px solid ${accentColor};
-                background: rgba(0, 0, 0, 0.2);
-                color: ${accentColor};
-            }
-        </style>
-        
-        <div class="detail-header">
-            <div class="detail-icon">
-                ${assetId === 'A1' ? '⚙️' : assetId === 'A2' ? '🔧' : '🌀'}
-            </div>
-            <div>
-                <h2 style="color: var(--text-primary); margin: 0; font-size: 1.1rem;">${title}</h2>
-                <span style="color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;">
-                    ${assetId === 'A1' ? 'Supervised Classification' : assetId === 'A2' ? 'Multi-target Classification' : 'Unsupervised Anomaly Detection'}
-                </span>
-            </div>
+
+    const layout = DSB_LAYOUT[assetId];
+    const L = dsbLatest[assetId] || {};
+    const statusFn = _DSB_STATUS_FN[assetId];
+    const { chips, tiles } = statusFn ? statusFn(L) : { chips: '', tiles: '' };
+    const accent = { A1: 'var(--a1-color)', A2: 'var(--a2-color)', A3: 'var(--a3-color)' }[assetId];
+    const ls = assetTelemetry[assetId]?.lastSeen || 0;
+    const ok = ls && Date.now() - ls <= STALE_MS[assetId];
+
+    let html = '';
+
+    // ── Header (copy exact simulator dashboard) ──
+    html += `
+      <div class="dsb-header">
+        <div>
+          <h2 style="color:${accent}">${layout.title}</h2>
+          <div class="sub">${layout.subtitle}</div>
         </div>
-        
-        <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 0.9rem;">${description}</p>
-        
-        <div class="detail-section">
-            <h3>Asset Details</h3>
-            ${details.map(d => `
-                <div class="detail-item">
-                    <span>${d.label}</span>
-                    <span class="value">${d.value}</span>
-                </div>
-            `).join('')}
-        </div>
-        
-        <div class="detail-section">
-            <h3>Performance <span style="font-size:11px;color:var(--accent-cyan);font-weight:400;margin-left:8px">● LIVE</span></h3>
-            ${performance.map((p, i) => `
-                <div class="detail-item">
-                    <span>${p.label}</span>
-                    <span class="value" id="detail-live-${i}">${p.value}</span>
-                </div>
-            `).join('')}
-        </div>
+        <div class="dsb-conn ${ok ? 'on' : 'off'}">${ok ? '● LIVE' : '● NO DATA'}</div>
+      </div>
     `;
-    
+
+    // ── Tiles ──
+    html += `<div class="dsb-tiles">${tiles}</div>`;
+    // ── Chips ──
+    html += `<div class="dsb-chips">${chips}</div>`;
+
+    // ── Charts grid container (will be populated by JS) ──
+    html += `<div class="dsb-charts-grid" id="dsb-charts-grid"></div>`;
+
     content.innerHTML = html;
-    
+
+    // Build chart instances now that DOM is painted
+    const grid = document.getElementById('dsb-charts-grid');
+    const charts = [];
+    for (const cfg of layout.charts) {
+        const wrap = document.createElement('div');
+        wrap.className = 'dsb-chart-wrap';
+        grid.appendChild(wrap);
+        charts.push(new DsbChart(wrap, cfg));
+    }
+    _dsbCurrent = { assetId, charts };
+
+    // Initial draw
+    requestAnimationFrame(() => {
+        for (const c of charts) c.render();
+    });
+
     // Raise 3D scene so the machine is well visible in the background
     raisePanelScene();
 
@@ -1344,6 +1271,450 @@ const assetTelemetry = {
 const STALE_MS = { A1: 8000, A2: 70000, A3: 20000 };
 
 // =====================================================================
+//  HYSTÉRÉSIS & STALE GUARD — Évitent les états panne permanents
+// =====================================================================
+// A3 anomaly : il faut 3 prédictions successives AU-DESSUS du seuil haut
+// pour passer en CRITICAL, puis 3 prédictions successives EN-DESSOUS du
+// seuil bas pour repasser en HEALTHY. De plus si aucun message analytics
+// reçu depuis STALE_MS[A3] on ne passe JAMAIS en critical.
+const _a3 = {
+    state: 'healthy',         // healthy | warning | critical
+    anomalyStreakHi: 0,       // compteur successif score > SEUIL_HAUT
+    anomalyStreakLo: 0,       // compteur successif score <= SEUIL_BAS
+    lastAnalyticsTs: 0,       // dernier TS de /analytics/anomaly
+    SEUIL_HAUT: 0.50,         // au-dessus = suspicion
+    SEUIL_BAS:  0.40,         // en-dessous = retour normal confirmé
+    STREAK_CONFIRM: 3,        // nombre de confirmations nécessaires
+};
+
+// A2 : tracker le dernier message analytics pour STALE guard
+const _a2LastAnalyticsTs = 0;
+
+// =====================================================================
+//  ASSET DASHBOARD — Copie parfaite de sim/tools/dashboard.html
+//  Alimenté directement par les topics UNS MQTT 1Hz (ring buffers 600 pts)
+//  Aucune dépendance sur le serveur dashboard.py:8080
+// =====================================================================
+
+// --- Mapping sujet MQTT (snake_case UNS) ↔ dashboard key (CamelCase OPC UA) ---
+// Chaque asset reçoit ses topics sur jesa/site1/<area>/<folder>/<tag> via UNS gateway 1 Hz
+const _dsbUnsToKey = {
+    // A1 — topics reçus sur jesa/site1/workshop/milling/A1/
+    'A1@part/product_id':           'Part/ProductId',
+    'A1@part/product_type':         'Part/ProductType',
+    'A1@process/air_temperature_k': 'Process/AirTemperature_K',
+    'A1@process/process_temperature_k': 'Process/ProcessTemperature_K',
+    'A1@drive/rotational_speed_rpm':'Drive/RotationalSpeed_rpm',
+    'A1@drive/torque_nm':           'Drive/Torque_Nm',
+    'A1@tool/tool_wear_min':        'Tool/ToolWear_min',
+    'A1@status/machine_failure':    'Status/MachineFailure',
+    'A1@status/twf':                'Status/TWF',
+    'A1@status/hdf':                'Status/HDF',
+    'A1@status/pwf':                'Status/PWF',
+    'A1@status/osf':                'Status/OSF',
+    'A1@status/rnf':                'Status/RNF',
+    'A1@simulation/part_index':     'Simulation/PartIndex',
+
+    // A2 — topics reçus sur jesa/site1/workshop/hydraulics/A2/
+    'A2@hydraulic/ps1_bar':         'Hydraulic/PS1_bar',
+    'A2@hydraulic/ps2_bar':         'Hydraulic/PS2_bar',
+    'A2@hydraulic/ps3_bar':         'Hydraulic/PS3_bar',
+    'A2@hydraulic/ps4_bar':         'Hydraulic/PS4_bar',
+    'A2@hydraulic/ps5_bar':         'Hydraulic/PS5_bar',
+    'A2@hydraulic/ps6_bar':         'Hydraulic/PS6_bar',
+    'A2@hydraulic/flow1_lpm':       'Hydraulic/Flow1_lpm',
+    'A2@hydraulic/flow2_lpm':       'Hydraulic/Flow2_lpm',
+    'A2@thermal/ts1_c':             'Thermal/TS1_C',
+    'A2@thermal/ts2_c':             'Thermal/TS2_C',
+    'A2@thermal/ts3_c':             'Thermal/TS3_C',
+    'A2@thermal/ts4_c':             'Thermal/TS4_C',
+    'A2@motor/power_w':             'Motor/Power_W',
+    'A2@motor/vibration_mms':       'Motor/Vibration_mms',
+    'A2@kpis/cooling_efficiency_pct':'KPIs/CoolingEfficiency_pct',
+    'A2@kpis/cooling_power_kw':     'KPIs/CoolingPower_kW',
+    'A2@kpis/efficiency_factor_pct':'KPIs/EfficiencyFactor_pct',
+    'A2@condition/cooler_condition_pct':   'Condition/CoolerCondition_pct',
+    'A2@condition/valve_condition_pct':    'Condition/ValveCondition_pct',
+    'A2@condition/pump_leakage':           'Condition/PumpLeakage',
+    'A2@condition/accumulator_pressure_bar':'Condition/AccumulatorPressure_bar',
+    'A2@condition/stable_flag':            'Condition/StableFlag',
+    'A2@simulation/cycle_index':           'Simulation/CycleIndex',
+    'A2@simulation/cycle_second':          'Simulation/CycleSecond',
+
+    // A3 — topics reçus sur jesa/site1/fleet/apu/A3/
+    'A3@pneumatic/tp2_bar':         'Pneumatic/TP2_bar',
+    'A3@pneumatic/tp3_bar':         'Pneumatic/TP3_bar',
+    'A3@pneumatic/h1_bar':          'Pneumatic/H1_bar',
+    'A3@pneumatic/dv_pressure_bar': 'Pneumatic/DVPressure_bar',
+    'A3@pneumatic/reservoirs_bar':  'Pneumatic/Reservoirs_bar',
+    'A3@oil/temperature_c':         'Oil/Temperature_C',
+    'A3@motor/current_a':           'Motor/Current_A',
+    'A3@digital/comp':              'Digital/COMP',
+    'A3@digital/dv_electric':       'Digital/DVElectric',
+    'A3@digital/towers':            'Digital/Towers',
+    'A3@digital/mpg':               'Digital/MPG',
+    'A3@digital/lps':               'Digital/LPS',
+    'A3@digital/pressure_switch':   'Digital/PressureSwitch',
+    'A3@digital/oil_level':         'Digital/OilLevel',
+    'A3@digital/caudal_impulses':   'Digital/CaudalImpulses',
+    'A3@simulation/row_index':      'Simulation/RowIndex',
+    'A3@simulation/source_timestamp':'Simulation/SourceTimestamp',
+};
+
+// Layout charts par asset — match exact simulator dashboard.html
+const DSB_LAYOUT = {
+    A1: {
+        title: 'A1 — CNC Milling Machine',
+        subtitle: 'OPC UA field data polled at 1 Hz — AI4I 2020 dataset replay',
+        charts: [
+            { title: 'Torque',        unit: 'Nm',
+              series: [{ key: 'Drive/Torque_Nm',              label: 'Torque',  slot: 1 }] },
+            { title: 'Rotational speed', unit: 'rpm',
+              series: [{ key: 'Drive/RotationalSpeed_rpm',   label: 'Speed',   slot: 1 }] },
+            { title: 'Temperatures',  unit: 'K',
+              series: [
+                { key: 'Process/AirTemperature_K',     label: 'Air',      slot: 1 },
+                { key: 'Process/ProcessTemperature_K', label: 'Process',  slot: 2 },
+              ] },
+        ],
+    },
+    A2: {
+        title: 'A2 — Hydraulic Test Rig',
+        subtitle: 'OPC UA field data polled at 1 Hz — ZeMA condition monitoring dataset',
+        charts: [
+            { title: 'Hydraulic pressures', unit: 'bar',
+              series: [1, 2, 3, 4, 5, 6].map(i =>
+                ({ key: `Hydraulic/PS${i}_bar`, label: `PS${i}`, slot: i })) },
+            { title: 'Temperatures', unit: '°C',
+              series: [1, 2, 3, 4].map(i =>
+                ({ key: `Thermal/TS${i}_C`, label: `TS${i}`, slot: i })) },
+            { title: 'Motor power', unit: 'W',
+              series: [{ key: 'Motor/Power_W', label: 'Power', slot: 1 }] },
+        ],
+    },
+    A3: {
+        title: 'A3 — APU Air Compressor',
+        subtitle: 'OPC UA field data polled at 1 Hz — MetroPT-3 dataset (x60 replay)',
+        charts: [
+            { title: 'Pneumatic pressures', unit: 'bar',
+              series: [
+                { key: 'Pneumatic/TP2_bar',         label: 'TP2',       slot: 1 },
+                { key: 'Pneumatic/TP3_bar',         label: 'TP3',       slot: 2 },
+                { key: 'Pneumatic/H1_bar',          label: 'H1',        slot: 3 },
+                { key: 'Pneumatic/DVPressure_bar',  label: 'DV',        slot: 5 },
+                { key: 'Pneumatic/Reservoirs_bar',  label: 'Reservoirs',slot: 6 },
+              ] },
+            { title: 'Motor current', unit: 'A',
+              series: [{ key: 'Motor/Current_A', label: 'Current', slot: 1 }] },
+            { title: 'Oil temperature', unit: '°C',
+              series: [{ key: 'Oil/Temperature_C', label: 'Oil', slot: 1 }] },
+        ],
+    },
+};
+
+// --- Ring buffers 600 points (10 minutes @ 1Hz) ---
+const DSB_SERIES_MAX = 600;
+const dsbRingBuffers = {
+    A1: {},  // key -> { t:[], v:[] }
+    A2: {},
+    A3: {},
+};
+// Valeurs les plus récentes (pour tiles + chips) : map key -> valeur scalaire
+const dsbLatest = { A1: {}, A2: {}, A3: {} };
+
+function _dsbEnsureBuffer(assetId, key) {
+    if (!dsbRingBuffers[assetId][key]) dsbRingBuffers[assetId][key] = { t: [], v: [] };
+    return dsbRingBuffers[assetId][key];
+}
+function _dsbPush(assetId, key, val) {
+    const buf = _dsbEnsureBuffer(assetId, key);
+    const now = Date.now();
+    buf.t.push(now);
+    buf.v.push(val);
+    while (buf.t.length > DSB_SERIES_MAX) { buf.t.shift(); buf.v.shift(); }
+    dsbLatest[assetId][key] = val;
+}
+// Convertit topic MQTT jesa/site1/.../A?/folder/tag → AssetId + buffer key
+function _dsbRouteTopic(topic, v) {
+    // topic exemple : jesa/site1/workshop/milling/A1/process/air_temperature_k
+    const m = topic.match(/\/(A[123])\/(.+)$/);
+    if (!m) return false;
+    const [, assetId, rest] = m;
+    const lookupKey = `${assetId}@${rest}`;
+    const dashboardKey = _dsbUnsToKey[lookupKey];
+    if (!dashboardKey) return false;
+    _dsbPush(assetId, dashboardKey, v);
+    return true;
+}
+
+// --- helpers pour classe Chart (copie exacte simulator html) ---
+const _dsbCss = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const _dsbSeriesColor = slot => _dsbCss(`--dsb-s${slot}`) || '#888';
+function _dsbFmt(v) {
+    if (v == null || Number.isNaN(v)) return '-';
+    const a = Math.abs(v);
+    if (a >= 1000) return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    if (a >= 100)  return v.toFixed(1);
+    return v.toFixed(2);
+}
+const _dsbFmtTime = ms => new Date(ms).toLocaleTimeString('en-GB');
+function _dsbNiceTicks(lo, hi, n) {
+    if (!(hi > lo)) { hi = lo + 1; lo = lo - 1; }
+    const span = hi - lo, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+    const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+    const first = Math.ceil(lo / step) * step, ticks = [];
+    for (let v = first; v <= hi + 1e-9; v += step) ticks.push(v);
+    return ticks;
+}
+
+// --- Classe Chart custom canvas (identique dashboard.html, préfixée dsb-) ---
+class DsbChart {
+    constructor(container, cfg) {
+        this.cfg = cfg;
+        this.hoverIdx = null;
+        this.tableMode = false;
+
+        const head = document.createElement('div');
+        head.className = 'dsb-chart-head';
+        head.innerHTML = `<h3>${cfg.title} (${cfg.unit})</h3>`;
+        this.btn = document.createElement('button');
+        this.btn.textContent = 'Table';
+        this.btn.onclick = () => {
+            this.tableMode = !this.tableMode;
+            this.btn.textContent = this.tableMode ? 'Chart' : 'Table';
+            this.render();
+        };
+        head.appendChild(this.btn);
+
+        const root = document.createElement('div');
+        root.className = 'dsb-chart';
+        root.appendChild(head);
+
+        if (cfg.series.length >= 2) {
+            const legend = document.createElement('div');
+            legend.className = 'dsb-legend';
+            legend.innerHTML = cfg.series.map(s =>
+                `<span><i style="background:${_dsbSeriesColor(s.slot)}"></i>${s.label}</span>`).join('');
+            root.appendChild(legend);
+        }
+
+        this.plot = document.createElement('div');
+        this.plot.className = 'dsb-plot';
+        this.canvas = document.createElement('canvas');
+        this.tooltip = document.createElement('div');
+        this.tooltip.className = 'dsb-tooltip';
+        this.tableEl = document.createElement('div');
+        this.plot.append(this.canvas, this.tooltip, this.tableEl);
+        root.appendChild(this.plot);
+        container.appendChild(root);
+
+        this.canvas.addEventListener('pointermove', e => this._onHover(e));
+        this.canvas.addEventListener('pointerleave', () => {
+            this.hoverIdx = null;
+            this.tooltip.style.display = 'none';
+            this.draw();
+        });
+    }
+    points(key, assetId) {
+        const aId = assetId || _currentDetailAsset;
+        const s = aId && dsbRingBuffers[aId] && dsbRingBuffers[aId][key];
+        return s && s.t.length ? s : null;
+    }
+    extent(assetId) {
+        const aId = assetId || _currentDetailAsset;
+        let tLo = Infinity, tHi = -Infinity, vLo = Infinity, vHi = -Infinity, any = false;
+        for (const s of this.cfg.series) {
+            const p = this.points(s.key, aId);
+            if (!p) continue;
+            any = true;
+            tLo = Math.min(tLo, p.t[0]); tHi = Math.max(tHi, p.t[p.t.length - 1]);
+            for (const v of p.v) { vLo = Math.min(vLo, v); vHi = Math.max(vHi, v); }
+        }
+        if (!any) return null;
+        if (vHi === vLo) { vHi += 1; vLo -= 1; }
+        const pad = (vHi - vLo) * 0.08;
+        return { tLo, tHi: Math.max(tHi, tLo + 1), vLo: vLo - pad, vHi: vHi + pad };
+    }
+    render() {
+        this.canvas.style.display = this.tableMode ? 'none' : 'block';
+        this.tableEl.innerHTML = '';
+        if (this.tableMode) this._renderTable(); else this.draw();
+    }
+    draw() {
+        const cv = this.canvas, dpr = window.devicePixelRatio || 1;
+        const w = cv.clientWidth, h = cv.clientHeight || 150;
+        if (!w) return;
+        cv.width = w * dpr; cv.height = h * dpr;
+        const ctx = cv.getContext('2d');
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, w, h);
+        ctx.font = '10.5px system-ui, "Inter", sans-serif';
+
+        const ext = this.extent();
+        if (!ext) {
+            ctx.fillStyle = _dsbCss('--text-muted');
+            ctx.textAlign = 'center';
+            ctx.fillText('waiting for data…', w / 2, h / 2);
+            return;
+        }
+        const m = { l: 46, r: 12, t: 8, b: 18 };
+        const X = t => m.l + (t - ext.tLo) / (ext.tHi - ext.tLo) * (w - m.l - m.r);
+        const Y = v => m.t + (1 - (v - ext.vLo) / (ext.vHi - ext.vLo)) * (h - m.t - m.b);
+
+        // gridlines + y ticks
+        ctx.strokeStyle = _dsbCss('--border'); ctx.lineWidth = 1;
+        ctx.fillStyle = _dsbCss('--text-muted'); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        for (const v of _dsbNiceTicks(ext.vLo, ext.vHi, 4)) {
+            const y = Math.round(Y(v)) + 0.5;
+            ctx.beginPath(); ctx.moveTo(m.l, y); ctx.lineTo(w - m.r, y); ctx.stroke();
+            ctx.fillText(_dsbFmt(v), m.l - 6, y);
+        }
+        // x labels: first / last timestamp
+        ctx.textBaseline = 'alphabetic';
+        ctx.textAlign = 'left';  ctx.fillText(_dsbFmtTime(ext.tLo), m.l, h - 5);
+        ctx.textAlign = 'right'; ctx.fillText(_dsbFmtTime(ext.tHi), w - m.r, h - 5);
+
+        // crosshair
+        if (this.hoverIdx != null) {
+            const p0 = this.points(this.cfg.series[0].key);
+            if (p0 && p0.t[this.hoverIdx] != null) {
+                const x = Math.round(X(p0.t[this.hoverIdx])) + 0.5;
+                ctx.strokeStyle = _dsbCss('--accent-cyan');
+                ctx.beginPath(); ctx.moveTo(x, m.t); ctx.lineTo(x, h - m.b); ctx.stroke();
+            }
+        }
+
+        // series lines
+        for (const s of this.cfg.series) {
+            const p = this.points(s.key);
+            if (!p) continue;
+            const color = _dsbSeriesColor(s.slot);
+            ctx.strokeStyle = color; ctx.lineWidth = 2;
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.beginPath();
+            for (let i = 0; i < p.t.length; i++) {
+                const x = X(p.t[i]), y = Y(p.v[i]);
+                i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            }
+            ctx.stroke();
+            const xe = X(p.t[p.t.length - 1]), ye = Y(p.v[p.v.length - 1]);
+            ctx.beginPath(); ctx.arc(xe, ye, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = color; ctx.fill();
+            ctx.strokeStyle = _dsbCss('--bg-card'); ctx.lineWidth = 2; ctx.stroke();
+        }
+    }
+    _onHover(e) {
+        if (this.tableMode) return;
+        const p0 = this.points(this.cfg.series[0].key);
+        const ext = this.extent();
+        if (!p0 || !ext) return;
+        const rect = this.canvas.getBoundingClientRect();
+        const frac = (e.clientX - rect.left - 46) / (rect.width - 46 - 12);
+        const t = ext.tLo + Math.min(Math.max(frac, 0), 1) * (ext.tHi - ext.tLo);
+        let best = 0;
+        for (let i = 1; i < p0.t.length; i++)
+            if (Math.abs(p0.t[i] - t) < Math.abs(p0.t[best] - t)) best = i;
+        this.hoverIdx = best;
+
+        const rows = this.cfg.series.map(s => {
+            const p = this.points(s.key);
+            const v = p ? p.v[Math.min(best, p.v.length - 1)] : null;
+            return `<div class="tt-row"><i style="background:${_dsbSeriesColor(s.slot)}"></i>`
+                 + `${s.label}<b>${_dsbFmt(v)}</b></div>`;
+        }).join('');
+        this.tooltip.innerHTML =
+            `<div class="tt-time">${_dsbFmtTime(p0.t[best])} · ${this.cfg.unit}</div>${rows}`;
+        this.tooltip.style.display = 'block';
+        const xpx = e.clientX - rect.left;
+        this.tooltip.style.left = Math.min(xpx + 14, rect.width - 160) + 'px';
+        this.tooltip.style.top = '6px';
+        this.draw();
+    }
+    _renderTable() {
+        const p0 = this.points(this.cfg.series[0].key);
+        if (!p0) { this.tableEl.innerHTML = '<div class="dsb-empty">waiting for data…</div>'; return; }
+        const n = Math.min(12, p0.t.length);
+        let html = `<table class="dsb-table"><tr><th>Time</th>`
+            + this.cfg.series.map(s => `<th>${s.label}</th>`).join('') + '</tr>';
+        for (let i = p0.t.length - n; i < p0.t.length; i++) {
+            html += `<tr><td>${_dsbFmtTime(p0.t[i])}</td>` + this.cfg.series.map(s => {
+                const p = this.points(s.key);
+                return `<td>${_dsbFmt(p ? p.v[i] : null)}</td>`;
+            }).join('') + '</tr>';
+        }
+        this.tableEl.innerHTML = html + '</table>';
+    }
+}
+
+// --- Tiles + Chips functions par asset (copie exacte dashboard.html a1Status/a2Status/a3Status) ---
+function _dsbChip(state, icon, text) {
+    return `<span class="dsb-chip ${state}"><span class="ico">${icon}</span>${text}</span>`;
+}
+function _dsbToggleChip(on, text) {
+    return `<span class="dsb-chip ${on ? 'on' : ''}"><span class="dot"></span>${text}</span>`;
+}
+function _dsbTile(label, value, unit = '') {
+    return `<div class="dsb-tile"><div class="label">${label}</div>`
+         + `<div class="value">${value}<span class="unit"> ${unit}</span></div></div>`;
+}
+function _dsbA1Status(L) {
+    const modes = { TWF: 'Tool wear', HDF: 'Heat dissipation', PWF: 'Power', OSF: 'Overstrain', RNF: 'Random' };
+    let chips = L['Status/MachineFailure']
+        ? _dsbChip('critical', '✕', 'Machine failure')
+        : _dsbChip('good', '✓', 'Operating');
+    for (const [key, label] of Object.entries(modes))
+        if (L[`Status/${key}`]) chips += _dsbChip('critical', '✕', label);
+    const tiles =
+        _dsbTile('Part',       `${L['Part/ProductId'] ?? '-'}`,
+                 `type ${L['Part/ProductType'] ?? '-'}`) +
+        _dsbTile('Parts machined', L['Simulation/PartIndex'] ?? '-') +
+        _dsbTile('Tool wear',    L['Tool/ToolWear_min']    ?? '-', 'min');
+    return { chips, tiles };
+}
+function _dsbA2Status(L) {
+    const grade = (value, map) => map[value] || ['warning', '!'];
+    const cooler = grade(L['Condition/CoolerCondition_pct'],
+        { 100: ['good', '✓'], 20: ['serious', '▲'], 3: ['critical', '✕'] });
+    const valve = grade(L['Condition/ValveCondition_pct'],
+        { 100: ['good', '✓'], 90: ['warning', '!'], 80: ['serious', '▲'], 73: ['critical', '✕'] });
+    const pump = grade(L['Condition/PumpLeakage'],
+        { 0: ['good', '✓'], 1: ['warning', '!'], 2: ['critical', '✕'] });
+    const accu = grade(L['Condition/AccumulatorPressure_bar'],
+        { 130: ['good', '✓'], 115: ['warning', '!'], 100: ['serious', '▲'], 90: ['critical', '✕'] });
+    const chips =
+        _dsbChip(cooler[0], cooler[1], `Cooler ${L['Condition/CoolerCondition_pct'] ?? '-'}%`) +
+        _dsbChip(valve[0],  valve[1],  `Valve ${L['Condition/ValveCondition_pct'] ?? '-'}%`) +
+        _dsbChip(pump[0],   pump[1],   `Pump leak ${L['Condition/PumpLeakage'] ?? '-'}`) +
+        _dsbChip(accu[0],   accu[1],   `Accumulator ${L['Condition/AccumulatorPressure_bar'] ?? '-'} bar`) +
+        _dsbToggleChip(!L['Condition/StableFlag'], 'Stable');
+    const tiles =
+        _dsbTile('Cycle',        L['Simulation/CycleIndex']  ?? '-', '/ 2205') +
+        _dsbTile('Cycle second', L['Simulation/CycleSecond'] ?? '-', 's');
+    return { chips, tiles };
+}
+function _dsbA3Status(L) {
+    let chips = '';
+    chips += L['Digital/LPS']
+        ? _dsbChip('critical', '✕', 'LPS: pressure < 7 bar')
+        : _dsbChip('good', '✓', 'Pressure nominal');
+    if (L['Digital/OilLevel']) chips += _dsbChip('warning', '!', 'Oil level low');
+    chips += _dsbToggleChip(L['Digital/COMP'],         'COMP');
+    chips += _dsbToggleChip(L['Digital/DVElectric'],   'Under load');
+    chips += _dsbToggleChip(L['Digital/Towers'],       'Tower 2');
+    chips += _dsbToggleChip(L['Digital/MPG'],          'MPG');
+    chips += _dsbToggleChip(L['Digital/PressureSwitch'],'Pressure switch');
+    const ts = L['Simulation/SourceTimestamp'];
+    const tiles =
+        _dsbTile('Dataset time', ts ? ts.replace('T', ' ') : '-') +
+        _dsbTile('Row', (L['Simulation/RowIndex'] ?? 0).toLocaleString('en-US'));
+    return { chips, tiles };
+}
+const _DSB_STATUS_FN = { A1: _dsbA1Status, A2: _dsbA2Status, A3: _dsbA3Status };
+
+// Références des chart instances pour l'asset actuellement ouvert
+let _dsbCurrent = null;  // { assetId, charts: [DsbChart,...] }
+
+// =====================================================================
 //  A1 — CNC MILLING MACHINE (Detailed)
 // =====================================================================
 function buildA1() {
@@ -1866,6 +2237,11 @@ function onMessageArrived(message) {
         if (topic.includes('/A2/')) markAssetSeen('A2');
         if (topic.includes('/A3/')) markAssetSeen('A3');
 
+        // ── Dashboard ring buffers — feed from every UNS topic ──
+        try {
+            _dsbRouteTopic(topic, typeof v === 'boolean' ? (v ? 1 : 0) : Number(v));
+        } catch (_) { /* ignore routing failures for analytics-only topics */ }
+
         // ── A1 Milling ──
         if (topic.includes('/A1/analytics/machine_failure') || topic.includes('/A1/status/machine_failure')) {
             const failureProbability = payload.probability ?? ((v === 1 || v === true) ? 1 : 0);
@@ -1904,6 +2280,8 @@ function onMessageArrived(message) {
         //   pump:   0=no leak, 1=weak leak, 2=severe leak
         //   accum.: 130=optimal, 115=slightly reduced, 100=severely reduced, 90=close to failure
         else if (topic.includes('/A2/analytics/cooler_condition')) {
+            _a2LastAnalyticsTs = Date.now();
+
             // Map class → health % and label
             const coolerMap = { 100: { pct: 100, txt: 'Optimal',      cls: 'healthy'  },
                                   20: { pct:  60, txt: 'Partial',      cls: 'warning'  },
@@ -1953,11 +2331,48 @@ function onMessageArrived(message) {
 
         // ── A3 APU Compressor ──
         else if (topic.includes('/A3/analytics/anomaly')) {
-            const score = payload.score ? payload.score.toFixed(3) : '—';
-            document.getElementById('a3-score').textContent = score;
-            document.getElementById('a3-bar').style.width = Math.min((payload.score || 0) * 100, 100) + '%';
+            _a3.lastAnalyticsTs = Date.now();
+            const rawScore   = payload.score != null ? +payload.score : 0;
+            const scoreStr   = payload.score ? payload.score.toFixed(3) : '—';
+            document.getElementById('a3-score').textContent = scoreStr;
+            document.getElementById('a3-bar').style.width = Math.min(rawScore * 100, 100) + '%';
 
-            if (v === 1) {
+            // ── HYSTÉRÉSIS A3 ─────────────────────────────────────────
+            // On ne fait PAS confiance au drapeau v=1 du backend (seuil 0.3468).
+            // On applique notre propre fenêtre à 3 confirmations successives
+            // avec seuil haut 0.50 et seuil bas 0.40.
+            if (rawScore > _a3.SEUIL_HAUT) {
+                _a3.anomalyStreakHi = Math.min(_a3.anomalyStreakHi + 1, _a3.STREAK_CONFIRM + 1);
+                _a3.anomalyStreakLo = 0;
+            } else if (rawScore <= _a3.SEUIL_BAS) {
+                _a3.anomalyStreakLo = Math.min(_a3.anomalyStreakLo + 1, _a3.STREAK_CONFIRM + 1);
+                _a3.anomalyStreakHi = 0;
+            }
+
+            // STALE GUARD : si l'analytics est vieux on refuse d'aller en critical
+            const ageAnalytics = Date.now() - _a3.lastAnalyticsTs;
+            const allowCritical = ageAnalytics < STALE_MS.A3;
+
+            // Decision machine d'état
+            let nextState = _a3.state;
+            if (_a3.anomalyStreakHi >= _a3.STREAK_CONFIRM && allowCritical) {
+                nextState = 'critical';
+            } else if (rawScore > 0.45 && allowCritical) {
+                nextState = nextState === 'critical' ? 'critical' : 'warning';
+            } else if (_a3.anomalyStreakLo >= _a3.STREAK_CONFIRM) {
+                nextState = 'healthy';
+            } else if (_a3.state === 'critical' && rawScore <= _a3.SEUIL_BAS) {
+                nextState = 'warning'; // transition douce
+            }
+            _a3.state = nextState;
+
+            // ── APPLICATION UI ────────────────────────────────────────
+            const barGrad  = _a3.state === 'critical'
+                ? 'linear-gradient(90deg, #ff1744, #ff5252)'
+                : 'linear-gradient(90deg, var(--a3-color), #a78bfa)';
+            document.getElementById('a3-bar').style.background = barGrad;
+
+            if (_a3.state === 'critical') {
                 document.getElementById('a3-status').textContent = 'ANOMALY';
                 document.getElementById('a3-status').className = 'gauge-value critical';
                 document.getElementById('a3-score').className = 'gauge-value mono critical';
@@ -1965,8 +2380,16 @@ function onMessageArrived(message) {
                 setCardGlow('card-a3', 'asset-card critical-glow');
                 setAssetGlow('A3', COLORS.critical);
                 a3Vibration = 0.4;
-                document.getElementById('a3-bar').style.background = 'linear-gradient(90deg, #ff1744, #ff5252)';
-                _logEvent(`A3 — ANOMALY detected (score: ${score})`, 'critical');
+                _logEvent(`A3 — ANOMALY confirmée (score=${scoreStr}, streak=${_a3.anomalyStreakHi})`, 'critical');
+            } else if (_a3.state === 'warning') {
+                document.getElementById('a3-status').textContent = 'WATCH';
+                document.getElementById('a3-status').className = 'gauge-value warning';
+                document.getElementById('a3-score').className = 'gauge-value mono warning';
+                setChip('a3-chip', 'Watch', 'warning');
+                setCardGlow('card-a3', 'asset-card warning-glow');
+                setAssetGlow('A3', COLORS.warning);
+                a3Vibration = 0.15;
+                _logEvent(`A3 — Watch (score=${scoreStr})`, 'warning');
             } else {
                 document.getElementById('a3-status').textContent = 'NORMAL';
                 document.getElementById('a3-status').className = 'gauge-value good';
@@ -1975,11 +2398,10 @@ function onMessageArrived(message) {
                 setCardGlow('card-a3', 'asset-card healthy-glow');
                 setAssetGlow('A3', COLORS.good);
                 a3Vibration = 0;
-                document.getElementById('a3-bar').style.background = 'linear-gradient(90deg, var(--a3-color), #a78bfa)';
-                _logEvent(`A3 — Normal (score: ${score})`, 'info');
+                _logEvent(`A3 — Normal (score=${scoreStr})`, 'info');
             }
             // ── Viz ring buffer push ──
-            _vizPush(vizData.A3.anomalyScore, payload.score != null ? +payload.score : 0);
+            _vizPush(vizData.A3.anomalyScore, rawScore);
             _vizPush(vizData.A3.timestamps,   _vizTimestamp());
         }
 

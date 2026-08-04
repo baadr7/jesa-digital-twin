@@ -3,6 +3,26 @@ __pycache__/
 .venv/
 .env
 
+# Logs & build artifacts
+*.log
+build_*.bat
+*_out.txt
+*_err.log
+*_out.log
+plc_err.log
+plc_out.log
+sim_err.log
+sim_out.log
+web_err.log
+web_out.log
+ml_err.log
+ml_out.log
+build.log
+build_err.log
+pytest_out.txt
+.coverage
+report/
+
 # Notebook outputs (figures are embedded as base64 inside .ipynb)
 notebooks/*.png
 
@@ -27,3 +47,6 @@ debug-twin-ui-server-check.md
 .idea/
 .vscode/
 *.swp
+
+# Docker
+.dockerignore

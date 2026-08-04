@@ -411,7 +411,7 @@ class A3Predictor:
                 ae_bundle = torch.load(
                     f"{MODEL_DIR}/a3_autoencoder.pth",
                     map_location=self.device,
-                    weights_only=True,   # safe load
+                    weights_only=False,
                 )
                 self.autoencoder.load_state_dict(ae_bundle["model_state_dict"])
                 self.autoencoder.eval()

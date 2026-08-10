@@ -8,28 +8,15 @@ FROM nodered/node-red:4.0.9-18
 
 USER root
 RUN apk add --no-cache python3 make g++ linux-headers
-USER node-red
 
 COPY infra/nodered/package.json /data/package.json
 
-# Install required nodes including hexy@0.3.4 (CJS version needed by node-opcua-debug)
 RUN cd /data \
-    && npm install --save --ignore-scripts \
-        hexy@0.3.4 \
-        node-red-contrib-opcua@0.2.354 \
-        node-red-dashboard@3.6.5 \
-        node-red-node-ui-table@0.4.5 \
-        --no-audit --no-fund
+    && npm install --no-audit --no-fund \
+    && find node_modules -mindepth 2 -name hexy -type d -exec rm -rf {} + 2>/dev/null || true \
+    && chown -R node-red:node-red /data
 
-# Purge ALL nested ESM hexy copies so every node-opcua sub-package
-# resolves to the top-level hexy@0.3.4 (CommonJS).
-RUN cd /data \
-    && find node_modules/node-opcua*/node_modules -name hexy -type d -exec rm -rf {} + 2>/dev/null; \
-       find node_modules/*/node_modules -name hexy -type d -exec rm -rf {} + 2>/dev/null; \
-       find node_modules -path '*/node_modules/hexy' -not -path 'node_modules/hexy' -type d -exec rm -rf {} + 2>/dev/null; \
-       true \
-    && npm dedupe 2>/dev/null || true \
-    && npm rebuild \
-    && npm cache clean --force
+USER node-red
 
 LABEL jesa.version="1.0" jesa.node-red="4.0.9" jesa.node="18"
+

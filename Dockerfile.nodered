@@ -4,19 +4,20 @@
 #
 # flows.json + settings.js are bind-mounted at runtime.
 
-FROM nodered/node-red:4.0.9-18
+FROM nodered/node-red:4.0.9-20
 
 USER root
 RUN apk add --no-cache python3 make g++ linux-headers
 
-COPY infra/nodered/package.json /data/package.json
+WORKDIR /usr/src/node-red
+COPY infra/nodered/package.json /usr/src/node-red/package.json
 
-RUN cd /data \
-    && npm install --no-audit --no-fund \
+RUN npm install --no-audit --no-fund \
     && find node_modules -mindepth 2 -name hexy -type d -exec rm -rf {} + 2>/dev/null || true \
-    && chown -R node-red:node-red /data
+    && chown -R node-red:node-red /usr/src/node-red
 
 USER node-red
+WORKDIR /usr/src/node-red
 
-LABEL jesa.version="1.0" jesa.node-red="4.0.9" jesa.node="18"
+LABEL jesa.version="1.0" jesa.node-red="4.0.9" jesa.node="20"
 

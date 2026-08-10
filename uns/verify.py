@@ -19,7 +19,6 @@ import json
 import subprocess
 import sys
 import time
-import threading
 from collections import defaultdict
 
 import paho.mqtt.client as mqtt
@@ -40,7 +39,6 @@ INFLUX_BUCKET = "telemetry"
 def collect_messages(seconds: int) -> dict[str, list[dict]]:
     """Subscribe to jesa/site1/# and collect messages for `seconds`."""
     messages: dict[str, list[dict]] = defaultdict(list)
-    stop = threading.Event()
 
     def on_message(client, userdata, msg):
         try:
@@ -122,7 +120,7 @@ def check_influxdb() -> bool:
         )
         resp = urllib.request.urlopen(req, timeout=5)
         body = resp.read().decode()
-        lines = [l for l in body.strip().split("\n") if l and not l.startswith("#")]
+        lines = [line for line in body.strip().split("\n") if line and not line.startswith("#")]
         return len(lines) > 1  # header + at least 1 data row
     except Exception as e:
         print(f"  InfluxDB check failed: {e}")

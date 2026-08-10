@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from sim.config import A1_DATASET
 from sim.assets.a1_milling import A1MillingSimulator
 

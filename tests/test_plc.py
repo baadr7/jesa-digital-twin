@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 import pytest
 
-from sim.plc import PlcRuntime, SCAN_PERIOD_S
+from sim.plc import PlcRuntime
 
 
 @pytest.fixture

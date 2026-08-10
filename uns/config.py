@@ -7,7 +7,7 @@ derived from docs/asset-attribute-map.md §2 and docs/uns-spec.md §3.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # ─── MQTT broker ─────────────────────────────────────────────────────────
 

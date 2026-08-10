@@ -263,7 +263,6 @@ class PlcRuntime:
         out = dict(raw)
         for key in ALARM_KEYS:
             raw_val = bool(raw.get(key, False))
-            current_state = self._alarm_state.get(key, False)
 
             if raw_val:
                 # Rising: increment pending, reset clearing counter

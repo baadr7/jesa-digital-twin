@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import sys
 
 from uns import config
 from uns.gateway import run_gateway

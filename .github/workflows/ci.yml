@@ -20,10 +20,10 @@ jobs:
           cache: "pip"
 
       - name: Install lint tools
-        run: pip install ruff
+        run: pip install ruff==0.15.22
 
       - name: Ruff lint
-        run: ruff check sim/ uns/ tests/ --line-length=100 --ignore=E501
+        run: ruff check sim/ uns/ tests/ --line-length=100 --ignore=E501 --extend-exclude=notebooks
 
   # ── 2. Unit tests + coverage ────────────────────────────────────────────
   test:

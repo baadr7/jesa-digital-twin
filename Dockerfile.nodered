@@ -21,9 +21,14 @@ RUN cd /data \
         node-red-node-ui-table@0.4.5 \
         --no-audit --no-fund
 
-# Purge any nested ESM hexy packages so node-opcua uses top-level hexy@0.3.4
+# Purge ALL nested ESM hexy copies so every node-opcua sub-package
+# resolves to the top-level hexy@0.3.4 (CommonJS).
 RUN cd /data \
-    && find node_modules -mindepth 2 -name hexy -exec rm -rf {} + 2>/dev/null || true \
+    && find node_modules/node-opcua*/node_modules -name hexy -type d -exec rm -rf {} + 2>/dev/null; \
+       find node_modules/*/node_modules -name hexy -type d -exec rm -rf {} + 2>/dev/null; \
+       find node_modules -path '*/node_modules/hexy' -not -path 'node_modules/hexy' -type d -exec rm -rf {} + 2>/dev/null; \
+       true \
+    && npm dedupe 2>/dev/null || true \
     && npm rebuild \
     && npm cache clean --force
 

@@ -1304,7 +1304,10 @@ const assetTelemetry = {
     A3: { lastSeen: 0, updates: 0 },
 };
 
-const STALE_MS = { A1: 8000, A2: 70000, A3: 20000 };
+// A1: event-driven ~10s/part — stale after 15s (1.5× interval)
+// A2: cycle-based, ML prediction every ~60s — stale after 70s
+// A3: 60× replay, prediction every 10s — stale after 20s
+const STALE_MS = { A1: 15000, A2: 70000, A3: 20000 };
 
 // =====================================================================
 //  HYSTÉRÉSIS & STALE GUARD — Évitent les états panne permanents
@@ -1325,6 +1328,32 @@ const _a3 = {
 
 // A2 : tracker le dernier message analytics pour STALE guard
 let _a2LastAnalyticsTs = 0;
+
+// A1 : previous state to detect transitions (avoid log spam)
+let _a1PrevState = '';   // '' | 'healthy' | 'warning' | 'critical'
+
+// A2 : worst-case state across all 4 conditions (cooler, valve, pump, accumulator)
+// Updated by each condition handler; drives chip + card glow + 3D glow
+const _a2State = { cooler: 'healthy', valve: 'healthy', pump: 'healthy', accum: 'healthy' };
+let   _a2PrevChipState = '';
+
+function _a2WorstState() {
+    const rank = { healthy: 0, warning: 1, critical: 2 };
+    const all  = Object.values(_a2State);
+    const max  = all.reduce((m, s) => rank[s] > rank[m] ? s : m, 'healthy');
+    return max;  // 'healthy' | 'warning' | 'critical'
+}
+
+function _a2ApplyChip() {
+    const worst = _a2WorstState();
+    if (worst === _a2PrevChipState) return;   // no change — skip DOM writes
+    _a2PrevChipState = worst;
+    const label    = worst === 'critical' ? 'Critical' : worst === 'warning' ? 'Warning' : 'Healthy';
+    const glowKey  = worst === 'critical' ? 'critical' : worst === 'warning' ? 'warning' : 'good';
+    setChip('a2-chip', label, worst === 'healthy' ? 'healthy' : worst);
+    setCardGlow('card-a2', 'asset-card ' + glowKey + '-glow');
+    setAssetGlow('A2', COLORS[glowKey]);
+}
 
 // =====================================================================
 //  ASSET DASHBOARD — Copie parfaite de sim/tools/dashboard.html
@@ -1406,10 +1435,7 @@ const _dsbUnsToKey = {
 const DSB_LAYOUT = {
     A1: {
         title: 'A1 — CNC Milling Machine',
-        // Event-driven: one sample per machined part, published every ~10 s real-time.
-        // ML inference runs at most once per second (throttled by last_predict guard).
         subtitle: 'Event-driven · 1 sample / part (~10 s) · AI4I 2020 dataset replay at 1×',
-        subtitle: 'OPC UA field data polled at 1 Hz — AI4I 2020 dataset replay',
         charts: [
             { title: 'Torque',        unit: 'Nm',
               series: [{ key: 'Drive/Torque_Nm',              label: 'Torque',  slot: 1 }] },
@@ -1495,8 +1521,6 @@ function _dsbRouteTopic(topic, v) {
     _dsbPush(assetId, dashboardKey, v);
     return true;
 }
-
-// --- helpers pour classe Chart (copie exacte simulator html) ---
 const _dsbCss = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const _dsbSeriesColor = slot => _dsbCss(`--dsb-s${slot}`) || '#888';
 function _dsbFmt(v) {
@@ -1752,10 +1776,11 @@ function _dsbA3Status(L) {
     chips += _dsbToggleChip(L['Digital/Towers'],       'Tower 2');
     chips += _dsbToggleChip(L['Digital/MPG'],          'MPG');
     chips += _dsbToggleChip(L['Digital/PressureSwitch'],'Pressure switch');
-    const ts = L['Simulation/SourceTimestamp'];
+    const ts  = L['Simulation/SourceTimestamp'];
+    const row = L['Simulation/RowIndex'];
     const tiles =
-        _dsbTile('Dataset time', ts ? ts.replace('T', ' ') : '-') +
-        _dsbTile('Row', (L['Simulation/RowIndex'] ?? 0).toLocaleString('en-US'));
+        _dsbTile('Dataset time', ts ? String(ts).replace('T', ' ').slice(0, 19) : '—') +
+        _dsbTile('Row', row != null && row !== 0 ? Number(row).toLocaleString('en-US') : '—');
     return { chips, tiles };
 }
 const _DSB_STATUS_FN = { A1: _dsbA1Status, A2: _dsbA2Status, A3: _dsbA3Status };
@@ -2329,10 +2354,21 @@ function onMessageArrived(message) {
 
         // ── Dashboard ring buffers — feed from every UNS topic ──
         // Guard: skip stale (v === null) and non-numeric string values
+        // Exception: source_timestamp is a string — route it directly to dsbLatest
         try {
             if (v !== null && v !== undefined && payload.q !== 'stale') {
-                const num = typeof v === 'boolean' ? (v ? 1 : 0) : Number(v);
-                if (!Number.isNaN(num)) _dsbRouteTopic(topic, num);
+                if (typeof v === 'string' && topic.includes('/simulation/source_timestamp')) {
+                    // String value — write directly to dsbLatest, skip numeric ring buffer
+                    const m2 = topic.match(/\/(A[123])\/(.+)$/);
+                    if (m2) {
+                        const [, aId, rest2] = m2;
+                        const dk = _dsbUnsToKey[`${aId}@${rest2}`];
+                        if (dk) dsbLatest[aId][dk] = v;
+                    }
+                } else {
+                    const num = typeof v === 'boolean' ? (v ? 1 : 0) : Number(v);
+                    if (!Number.isNaN(num)) _dsbRouteTopic(topic, num);
+                }
             }
         } catch (_) { /* ignore routing failures for analytics-only topics */ }
 
@@ -2367,47 +2403,53 @@ function onMessageArrived(message) {
 
         // ── A1 Milling ──
         if (topic.includes('/A1/analytics/machine_failure') || topic.includes('/A1/status/machine_failure')) {
+            if (v === null || v === undefined || payload.q === 'stale') return;
+
             const failureProbability = payload.probability ?? ((v === 1 || v === true) ? 1 : 0);
             const probVal = Number(failureProbability) * 100;
             const prob    = probVal.toFixed(1);
             document.getElementById('a1-prob').textContent = prob + '%';
             document.getElementById('a1-bar').style.width  = probVal.toFixed(1) + '%';
 
-            // Three levels based on probability AND binary failure flag
-            const isFailure = (v === 1 || v === true);
-            const isCritical = isFailure || probVal > 20;
-            const isWarning  = !isCritical && probVal > 5;
+            // Three-level state: critical (>20% or binary failure) / warning (5–20%) / healthy
+            const isFailure  = (v === 1 || v === true);
+            const newState   = (isFailure || probVal > 20) ? 'critical'
+                             : probVal > 5                 ? 'warning'
+                             :                               'healthy';
+            const stateChanged = newState !== _a1PrevState;
+            _a1PrevState = newState;
 
-            if (isCritical) {
-                document.getElementById('a1-status').textContent = isFailure ? 'FAILURE' : 'CRITICAL';
-                document.getElementById('a1-status').className = 'gauge-value critical';
-                document.getElementById('a1-prob').className   = 'gauge-value mono critical';
-                document.getElementById('a1-bar').style.background = 'linear-gradient(90deg, #ff1744, #ff5252)';
+            if (newState === 'critical') {
+                document.getElementById('a1-status').textContent  = isFailure ? 'FAILURE' : 'CRITICAL';
+                document.getElementById('a1-status').className    = 'gauge-value critical';
+                document.getElementById('a1-prob').className      = 'gauge-value mono critical';
+                document.getElementById('a1-bar').style.background = 'linear-gradient(90deg,#ff1744,#ff5252)';
                 setChip('a1-chip', 'Critical', 'critical');
                 setCardGlow('card-a1', 'asset-card critical-glow');
                 setAssetGlow('A1', COLORS.critical);
-                _logEvent(`A1 — ${isFailure ? 'FAILURE' : 'Critical'} (prob: ${prob}%)`, 'critical');
-            } else if (isWarning) {
-                document.getElementById('a1-status').textContent = 'WARNING';
-                document.getElementById('a1-status').className = 'gauge-value warning';
-                document.getElementById('a1-prob').className   = 'gauge-value mono warning';
-                document.getElementById('a1-bar').style.background = 'linear-gradient(90deg, var(--accent-amber), #fbbf24)';
+                if (stateChanged)
+                    _logEvent(`A1 — ${isFailure ? 'FAILURE' : 'Critical'} (prob: ${prob}%)`, 'critical');
+            } else if (newState === 'warning') {
+                document.getElementById('a1-status').textContent  = 'WARNING';
+                document.getElementById('a1-status').className    = 'gauge-value warning';
+                document.getElementById('a1-prob').className      = 'gauge-value mono warning';
+                document.getElementById('a1-bar').style.background = 'linear-gradient(90deg,var(--accent-amber),#fbbf24)';
                 setChip('a1-chip', 'Warning', 'warning');
                 setCardGlow('card-a1', 'asset-card warning-glow');
                 setAssetGlow('A1', COLORS.warning);
-                _logEvent(`A1 — Warning (prob: ${prob}%)`, 'warning');
+                if (stateChanged)
+                    _logEvent(`A1 — Warning (prob: ${prob}%)`, 'warning');
             } else {
-                document.getElementById('a1-status').textContent = 'HEALTHY';
-                document.getElementById('a1-status').className = 'gauge-value good';
-                document.getElementById('a1-prob').className   = 'gauge-value mono';
-                document.getElementById('a1-bar').style.background = 'linear-gradient(90deg, var(--a1-color), #6c9bff)';
+                document.getElementById('a1-status').textContent  = 'HEALTHY';
+                document.getElementById('a1-status').className    = 'gauge-value good';
+                document.getElementById('a1-prob').className      = 'gauge-value mono';
+                document.getElementById('a1-bar').style.background = 'linear-gradient(90deg,var(--a1-color),#6c9bff)';
                 setChip('a1-chip', 'Healthy', 'healthy');
                 setCardGlow('card-a1', 'asset-card healthy-glow');
                 setAssetGlow('A1', COLORS.good);
-                // Only log at info when prob changed significantly (suppress 1Hz spam)
-                if (probVal > 1) _logEvent(`A1 — Healthy (prob: ${prob}%)`, 'info');
+                if (stateChanged)
+                    _logEvent(`A1 — Healthy (prob: ${prob}%)`, 'info');
             }
-            // ── Viz ring buffer push ──
             _vizPush(vizData.A1.failureProb, probVal);
             _vizPush(vizData.A1.timestamps,  _vizTimestamp());
         }
@@ -2420,11 +2462,12 @@ function onMessageArrived(message) {
         //   accum.: 130=optimal, 115=slightly reduced, 100=severely reduced, 90=close to failure
         else if (topic.includes('/A2/analytics/cooler_condition') ||
                  topic.includes('/A2/condition/cooler_condition_pct')) {
-            // Fired by ML inference (analytics/) every ~60s OR Node-RED OPC UA (condition/) every 1s
-            // Both carry the same ZeMA class integer — same display logic applies
+            // Guard: skip null, stale, or OPC UA default-zero (uninitialized)
+            if (v === null || v === undefined || payload.q === 'stale') return;
+            if (v === 0 && topic.includes('/A2/condition/')) return;
+
             if (topic.includes('/A2/analytics/')) _a2LastAnalyticsTs = Date.now();
 
-            // ZeMA cooler classes: 100=full efficiency, 20=partial, 3=near-failure, 0=failed
             const coolerMap = {
                 100: { pct: 100, txt: 'Optimal',      cls: 'healthy'  },
                  20: { pct:  60, txt: 'Partial',      cls: 'warning'  },
@@ -2433,22 +2476,17 @@ function onMessageArrived(message) {
             };
             const cm = coolerMap[v] ?? { pct: 0, txt: `Class ${v}`, cls: 'warning' };
 
-            // Resolve glow color — COLORS has no 'serious' key; map to nearest
-            const glowKey = cm.cls === 'healthy' ? 'good'
-                          : cm.cls === 'critical' ? 'critical'
-                          : 'warning';
-
             document.getElementById('a2-cooler').textContent = cm.txt + ' (class ' + v + ')';
             document.getElementById('a2-cooler').className   = 'gauge-value ' + cm.cls;
             document.getElementById('a2-bar').style.width    = cm.pct + '%';
-            setChip('a2-chip', cm.cls === 'healthy' ? 'Healthy' : cm.cls === 'critical' ? 'Critical' : 'Warning', cm.cls === 'healthy' ? 'healthy' : cm.cls === 'critical' ? 'critical' : 'warning');
-            setCardGlow('card-a2', 'asset-card ' + glowKey + '-glow');
-            setAssetGlow('A2', COLORS[glowKey]);
+
+            // Update worst-case tracker and drive chip/glow
+            _a2State.cooler = cm.cls;
+            _a2ApplyChip();
 
             if (topic.includes('/A2/analytics/'))
                 _logEvent(`A2 — Cooler: ${cm.txt} (class ${v})`, cm.cls === 'healthy' ? 'info' : cm.cls);
 
-            // Viz push only from ML analytics to avoid chart noise from 1Hz OPC UA
             a2LatestLabels.cooler = `${cm.txt} (${cm.pct}%)`;
             if (topic.includes('/A2/analytics/')) {
                 _vizPush(vizData.A2.cooler,     cm.pct);
@@ -2457,7 +2495,9 @@ function onMessageArrived(message) {
         }
         else if (topic.includes('/A2/analytics/valve_condition') ||
                  topic.includes('/A2/condition/valve_condition_pct')) {
-            // ZeMA valve classes: 100=optimal, 90=small lag, 80=severe lag, 73=near-failure
+            // Class 0 never valid for valve (valid: 100, 90, 80, 73)
+            if (v === null || v === undefined || payload.q === 'stale' || v === 0) return;
+
             const valveMap = {
                 100: { pct: 100, txt: 'Optimal',      cls: 'healthy'  },
                  90: { pct:  85, txt: 'Small lag',    cls: 'warning'  },
@@ -2465,37 +2505,49 @@ function onMessageArrived(message) {
                  73: { pct:  20, txt: 'Near-failure', cls: 'critical' },
             };
             const vm = valveMap[v] ?? { pct: Math.min(Number(v), 100), txt: `Class ${v}`, cls: 'warning' };
-            const glowKey = vm.cls === 'healthy' ? 'good' : vm.cls === 'critical' ? 'critical' : 'warning';
 
             document.getElementById('a2-valve').textContent = vm.txt + ' (class ' + v + ')';
             document.getElementById('a2-valve').className   = 'gauge-value mono ' + vm.cls;
+
+            // Update worst-case tracker and drive chip/glow
+            _a2State.valve = vm.cls;
+            _a2ApplyChip();
 
             if (topic.includes('/A2/analytics/'))
                 _logEvent(`A2 — Valve: ${vm.txt} (class ${v})`, vm.cls === 'healthy' ? 'info' : vm.cls);
 
             a2LatestLabels.valve = `${vm.txt} (${vm.pct}%)`;
-            if (topic.includes('/A2/analytics/')) {
+            if (topic.includes('/A2/analytics/'))
                 _vizPush(vizData.A2.valve, vm.pct);
-            }
         }
         else if (topic.includes('/A2/analytics/pump_leakage') ||
                  topic.includes('/A2/condition/pump_leakage')) {
-            const pumpMap = { 0: { txt: 'No leak',     cls: 'good'     },
-                              1: { txt: 'Weak leak',   cls: 'warning'  },
-                              2: { txt: 'Severe leak', cls: 'critical' } };
-            const pm = pumpMap[v] ?? { txt: 'Unknown', cls: 'warning' };
+            if (v === null || v === undefined || payload.q === 'stale') return;
+            const pumpMap = {
+                0: { txt: 'No leak',     cls: 'healthy'  },
+                1: { txt: 'Weak leak',   cls: 'warning'  },
+                2: { txt: 'Severe leak', cls: 'critical' },
+            };
+            const pm = pumpMap[v] ?? { txt: `Class ${v}`, cls: 'warning' };
+            _a2State.pump = pm.cls;
+            _a2ApplyChip();
             if (topic.includes('/A2/analytics/'))
-                _logEvent(`A2 — Pump: ${pm.txt} (class ${v})`, pm.cls === 'good' ? 'info' : pm.cls);
+                _logEvent(`A2 — Pump: ${pm.txt} (class ${v})`, pm.cls === 'healthy' ? 'info' : pm.cls);
         }
         else if (topic.includes('/A2/analytics/accumulator_pressure') ||
                  topic.includes('/A2/condition/accumulator_pressure_bar')) {
-            const accMap = { 130: { txt: 'Optimal',          cls: 'good'     },
-                             115: { txt: 'Slightly reduced',  cls: 'warning'  },
-                             100: { txt: 'Severely reduced',  cls: 'critical' },
-                              90: { txt: 'Near-failure',      cls: 'critical' } };
-            const am = accMap[v] ?? { txt: 'Unknown', cls: 'warning' };
+            if (v === null || v === undefined || payload.q === 'stale') return;
+            const accMap = {
+                130: { txt: 'Optimal',           cls: 'healthy'  },
+                115: { txt: 'Slightly reduced',  cls: 'warning'  },
+                100: { txt: 'Severely reduced',  cls: 'critical' },
+                 90: { txt: 'Near-failure',       cls: 'critical' },
+            };
+            const am = accMap[v] ?? { txt: `Class ${v}`, cls: 'warning' };
+            _a2State.accum = am.cls;
+            _a2ApplyChip();
             if (topic.includes('/A2/analytics/'))
-                _logEvent(`A2 — Accumulator: ${am.txt} (class ${v})`, am.cls === 'good' ? 'info' : am.cls);
+                _logEvent(`A2 — Accumulator: ${am.txt} (class ${v})`, am.cls === 'healthy' ? 'info' : am.cls);
         }
 
         // ── A3 APU Compressor ──
@@ -2528,14 +2580,18 @@ function onMessageArrived(message) {
             if (_a3.anomalyStreakHi >= _a3.STREAK_CONFIRM && allowCritical) {
                 nextState = 'critical';
             } else if (rawScore > _a3.SEUIL_HAUT && allowCritical && _a3.state === 'critical') {
-                nextState = 'critical'; // stay critical while streak active
-            } else if (rawScore > 0.45 && allowCritical) {
-                nextState = 'warning';
+                nextState = 'critical'; // stay critical while score above threshold
+            } else if (rawScore > (_a3.SEUIL_BAS + 0.05) && allowCritical) {
+                // Warning band: SEUIL_BAS+0.05 (0.45) → SEUIL_HAUT (0.50)
+                // Also warns when coming down from critical before streak confirms healthy
+                if (_a3.state !== 'critical') nextState = 'warning';
+                else nextState = 'warning'; // step-down from critical
             } else if (_a3.anomalyStreakLo >= _a3.STREAK_CONFIRM) {
                 nextState = 'healthy';
             } else if (_a3.state === 'critical' && rawScore <= _a3.SEUIL_BAS) {
-                nextState = 'warning'; // soft step down, not instant healthy
+                nextState = 'warning'; // soft step-down, not instant healthy
             }
+            const _a3StateChanged = nextState !== _a3.state;
             _a3.state = nextState;
 
             // ── UI update ─────────────────────────────────────────
@@ -2554,7 +2610,8 @@ function onMessageArrived(message) {
                 setCardGlow('card-a3', 'asset-card critical-glow');
                 setAssetGlow('A3', COLORS.critical);
                 a3Vibration = 0.4;
-                _logEvent(`A3 — ANOMALY (score=${scoreStr}, streak=${_a3.anomalyStreakHi})`, 'critical');
+                if (_a3StateChanged)
+                    _logEvent(`A3 — ANOMALY (score=${scoreStr}, streak=${_a3.anomalyStreakHi})`, 'critical');
             } else if (_a3.state === 'warning') {
                 document.getElementById('a3-status').textContent = 'WATCH';
                 document.getElementById('a3-status').className   = 'gauge-value warning';
@@ -2563,7 +2620,8 @@ function onMessageArrived(message) {
                 setCardGlow('card-a3', 'asset-card warning-glow');
                 setAssetGlow('A3', COLORS.warning);
                 a3Vibration = 0.15;
-                _logEvent(`A3 — Watch (score=${scoreStr})`, 'warning');
+                if (_a3StateChanged)
+                    _logEvent(`A3 — Watch (score=${scoreStr})`, 'warning');
             } else {
                 document.getElementById('a3-status').textContent = 'NORMAL';
                 document.getElementById('a3-status').className   = 'gauge-value good';
@@ -2572,7 +2630,7 @@ function onMessageArrived(message) {
                 setCardGlow('card-a3', 'asset-card healthy-glow');
                 setAssetGlow('A3', COLORS.good);
                 a3Vibration = 0;
-                if (_a3.anomalyStreakLo === 1) // log once on return to normal
+                if (_a3StateChanged)
                     _logEvent(`A3 — Normal (score=${scoreStr})`, 'info');
             }
             // ── Viz ring buffer push ──

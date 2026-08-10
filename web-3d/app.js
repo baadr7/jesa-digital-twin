@@ -108,6 +108,10 @@ function _refreshOverviewDynamic() {
 // =====================================================================
 const VIZ_MAX = 50; // max data-points kept per series
 
+// Latest text labels for A2 — set by onMessageArrived, used as fallback
+// when ring buffers haven't received a value yet (first cycle takes ~60 s)
+const a2LatestLabels = { cooler: null, valve: null };
+
 const vizData = {
     A1: {
         failureProb: [],   // 0-100 %
@@ -565,16 +569,23 @@ function _vizRefreshCharts() {
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
     // KPI strip (top)
-    set('viz-kpi-a1',  a1Latest  !== null ? a1Latest.toFixed(1)  + '%'   : '—');
-    set('viz-kpi-a2c', a2cLatest !== null ? a2cLatest.toFixed(0) + '%'   : '—');
-    set('viz-kpi-a2v', a2vLatest !== null ? a2vLatest.toFixed(0) + '%'   : '—');
-    set('viz-kpi-a3',  a3Latest  !== null ? a3Latest.toFixed(3)          : '—');
+    // A2: if ring buffer has a value show %, otherwise fall back to the text label
+    // stored the moment the last MQTT analytics message arrived (set before ring push)
+    const a2cDisplay = a2cLatest !== null ? a2cLatest.toFixed(0) + '%'
+                     : (a2LatestLabels.cooler ?? '—');
+    const a2vDisplay = a2vLatest !== null ? a2vLatest.toFixed(0) + '%'
+                     : (a2LatestLabels.valve  ?? '—');
+
+    set('viz-kpi-a1',  a1Latest  !== null ? a1Latest.toFixed(1)  + '%' : '—');
+    set('viz-kpi-a2c', a2cDisplay);
+    set('viz-kpi-a2v', a2vDisplay);
+    set('viz-kpi-a3',  a3Latest  !== null ? a3Latest.toFixed(3)        : '—');
 
     // Chart card "Latest" stats
-    set('viz-a1-latest',  a1Latest  !== null ? a1Latest.toFixed(1)  + '%'   : '—');
-    set('viz-a3-latest',  a3Latest  !== null ? a3Latest.toFixed(3)          : '—');
-    set('viz-a2c-latest', a2cLatest !== null ? a2cLatest.toFixed(0) + '%'   : '—');
-    set('viz-a2v-latest', a2vLatest !== null ? a2vLatest.toFixed(0) + '%'   : '—');
+    set('viz-a1-latest',  a1Latest  !== null ? a1Latest.toFixed(1)  + '%' : '—');
+    set('viz-a3-latest',  a3Latest  !== null ? a3Latest.toFixed(3)        : '—');
+    set('viz-a2c-latest', a2cDisplay);
+    set('viz-a2v-latest', a2vDisplay);
 }
 
 function renderVisualisationPage() {
@@ -2301,6 +2312,7 @@ function onMessageArrived(message) {
             setAssetGlow('A2', COLORS[cm.cls === 'healthy' ? 'good' : cm.cls]);
             _logEvent(`A2 — Cooler: ${cm.txt} (class ${v})`, cm.cls === 'healthy' ? 'info' : cm.cls);
             // ── Viz ring buffer push — use health % for chart ──
+            a2LatestLabels.cooler = `${cm.txt} (${cm.pct}%)`;
             _vizPush(vizData.A2.cooler,     cm.pct);
             _vizPush(vizData.A2.timestamps, _vizTimestamp());
         }
@@ -2316,6 +2328,7 @@ function onMessageArrived(message) {
             document.getElementById('a2-valve').className = 'gauge-value mono ' + vstate;
             _logEvent(`A2 — Valve: ${vm.txt} (class ${v})`, vstate === 'good' ? 'info' : vstate);
             // ── Viz ring buffer push — use health % ──
+            a2LatestLabels.valve = `${vm.txt} (${vm.pct}%)`;
             _vizPush(vizData.A2.valve, vm.pct);
         }
         else if (topic.includes('/A2/analytics/pump_leakage')) {

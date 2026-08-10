@@ -2,10 +2,13 @@ FROM python:3.11.9-slim-bookworm
 
 WORKDIR /app
 
+# Prevent .pyc files being written to bind-mounted paths (WSL2 corrupts them)
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV PIP_NO_CACHE_DIR=1
+# Redirect any residual pycache to tmpfs to avoid overlay-fs corruption
+ENV PYTHONPYCACHEPREFIX=/tmp/pycache
 
 COPY requirements.ml.txt ./requirements.ml.txt
 
@@ -22,4 +25,4 @@ ENV MQTT_HOST=mosquitto
 ENV MQTT_PORT=1883
 ENV MODEL_DIR=/app/notebooks/models
 
-CMD ["python", "-B", "-S", "uns/ml_inference_service.py"]
+CMD ["python", "-B", "uns/ml_inference_service.py"]

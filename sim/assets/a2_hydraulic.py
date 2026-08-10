@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
+import os
+
 import numpy as np
 
 from sim import config
@@ -67,15 +69,16 @@ class A2HydraulicSimulator(AssetSimulator):
             for cycle in range(self._cycles):
                 raw_cooler, raw_valve, raw_pump, raw_accum, stable = self._profile[cycle]
 
-                # --- OVERRIDE DÉMO JESA ---
-                # Le dataset ZeMA contient des classes dégradées (20, 3, 0 …)
-                # qui apparaissent en panne permanente dans le Live Twin.
-                # On force l'état OPTIMAL pour tous les cycles :
-                #   Cooler=100 (optimal), Valve=100, PumpLeakage=0 (no leak),
-                #   Accumulator=130 (optimal pressure).
-                # Les valeurs brutes du dataset restent consultables via
-                # self._profile[cycle] pour debugging.
-                cooler, valve, pump_leak, accumulator = 100, 100, 0, 130
+                # Publish real dataset condition classes so ML inference receives
+                # the actual degradation signal (cooler: 100/20/3/0,
+                # valve: 100/90/80/73, pump: 0/1/2, accum: 130/115/100/90).
+                # Pass --demo-stable to force optimal for live presentations.
+                if os.environ.get("JESA_DEMO_STABLE"):
+                    cooler, valve, pump_leak, accumulator = 100, 100, 0, 130
+                else:
+                    cooler, valve, pump_leak, accumulator = (
+                        int(raw_cooler), int(raw_valve), int(raw_pump), int(raw_accum)
+                    )
 
                 for second in range(self._cycle_seconds):
                     values: dict[str, Any] = {

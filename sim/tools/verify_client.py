@@ -18,7 +18,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
-from asyncua import Client, ua
+from asyncua.client.client import Client
+from asyncua import ua
 
 from sim import config
 from sim.plc import PLC_PORT

@@ -1,0 +1,216 @@
+# JESA Digital Twin — Grafana Alert Rules
+# Evaluates every 60s, notifications → jesa-ops contact point.
+#
+# Requires:
+#   - InfluxDB datasource named "InfluxDB-JESA" (provisioned via datasource.yml)
+#   - Grafana >= 9.x with unified alerting enabled
+#   - GRAFANA_WEBHOOK_URL env var set in docker-compose.yml (optional)
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: JESA Predictive Maintenance
+    folder: JESA
+    interval: 1m
+    rules:
+
+      # ── A1 — Failure probability high ───────────────────────────────────
+      - uid: a1-failure-prob-high
+        title: "A1 — Failure Probability High"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 120, to: 0 }
+            datasourceUid: influxdb-jesa
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -2m)
+                  |> filter(fn: (r) => r._measurement == "jesa_site1_workshop_milling_A1_analytics_machine_failure"
+                              and r._field == "probability")
+                  |> last()
+              type: flux
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0.70] }
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "A1 CNC failure probability exceeded 70%"
+          value: "{{ $values.B.Value | printf \"%.1f%%\" }}"
+        labels:
+          asset: A1
+          severity: warning
+
+      # ── A1 — Critical failure probability ────────────────────────────────
+      - uid: a1-failure-prob-critical
+        title: "A1 — Failure Probability Critical"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 120, to: 0 }
+            datasourceUid: influxdb-jesa
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -2m)
+                  |> filter(fn: (r) => r._measurement == "jesa_site1_workshop_milling_A1_analytics_machine_failure"
+                              and r._field == "probability")
+                  |> last()
+              type: flux
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0.90] }
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "A1 CNC CRITICAL — failure probability > 90%"
+          value: "{{ $values.B.Value | printf \"%.1f%%\" }}"
+        labels:
+          asset: A1
+          severity: critical
+
+      # ── A2 — Cooler condition degraded ───────────────────────────────────
+      - uid: a2-cooler-degraded
+        title: "A2 — Cooler Condition Degraded"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 180, to: 0 }
+            datasourceUid: influxdb-jesa
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -3m)
+                  |> filter(fn: (r) => r._measurement == "jesa_site1_workshop_hydraulics_A2_analytics_cooler_condition"
+                              and r._field == "v")
+                  |> last()
+              type: flux
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator: { type: lt, params: [20] }
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "A2 Hydraulic cooler condition degraded (class < 20%)"
+          value: "class {{ $values.B.Value }}"
+        labels:
+          asset: A2
+          severity: warning
+
+      # ── A3 — Anomaly score persistent ────────────────────────────────────
+      - uid: a3-anomaly-persistent
+        title: "A3 — Anomaly Score Elevated"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 120, to: 0 }
+            datasourceUid: influxdb-jesa
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -2m)
+                  |> filter(fn: (r) => r._measurement == "jesa_site1_fleet_apu_A3_analytics_anomaly"
+                              and r._field == "score")
+                  |> mean()
+              type: flux
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0.347] }
+        noDataState: NoData
+        execErrState: Error
+        for: 30s
+        annotations:
+          summary: "A3 APU anomaly score elevated for > 30s (threshold=0.347)"
+          value: "score={{ $values.B.Value | printf \"%.3f\" }}"
+        labels:
+          asset: A3
+          severity: warning
+
+      # ── A3 — Anomaly score critical ───────────────────────────────────────
+      - uid: a3-anomaly-critical
+        title: "A3 — Anomaly Score Critical"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 120, to: 0 }
+            datasourceUid: influxdb-jesa
+            model:
+              query: |
+                from(bucket: "telemetry")
+                  |> range(start: -2m)
+                  |> filter(fn: (r) => r._measurement == "jesa_site1_fleet_apu_A3_analytics_anomaly"
+                              and r._field == "score")
+                  |> mean()
+              type: flux
+          - refId: B
+            datasourceUid: "__expr__"
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: "__expr__"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator: { type: gt, params: [0.500] }
+        noDataState: NoData
+        execErrState: Error
+        for: 30s
+        annotations:
+          summary: "A3 APU CRITICAL — anomaly score > 0.500"
+          value: "score={{ $values.B.Value | printf \"%.3f\" }}"
+        labels:
+          asset: A3
+          severity: critical

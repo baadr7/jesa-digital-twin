@@ -1,0 +1,1116 @@
+[
+  {
+    "id": "tab-gw",
+    "type": "tab",
+    "label": "01 Ã‚Â· OPC UA Gateway",
+    "disabled": false,
+    "info": "Polls A1/A2/A3/PLC at 1 Hz. Publishes {ts,v,q} JSON to jesa/site1/Ã¢â‚¬Â¦ Replaces uns/gateway.py."
+  },
+  {
+    "id": "tab-der",
+    "type": "tab",
+    "label": "02 Ã‚Â· Derived Data",
+    "disabled": false,
+    "info": "Computes power_kw, delta_t, wear_torque (A1); cooler_delta_t, hydraulic_work (A2); comp_duty, pressure_diff (A3)."
+  },
+  {
+    "id": "tab-alm",
+    "type": "tab",
+    "label": "03 Ã‚Â· Alarm Engine",
+    "disabled": false,
+    "info": "ISA-18.2 HH/H/L/LL with deadband hysteresis and on-delay. Topics: .../alarms/{tag}"
+  },
+  {
+    "id": "tab-mon",
+    "type": "tab",
+    "label": "04 Ã‚Â· Monitor",
+    "disabled": false,
+    "info": "Node-RED dashboard: OPC UA health, active alarms table, msg/s gauge."
+  },
+  {
+    "id": "jesa-mqtt-broker",
+    "type": "mqtt-broker",
+    "name": "Mosquitto :1883",
+    "broker": "mosquitto",
+    "port": "1883",
+    "clientid": "jesa-nr-gw",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "5",
+    "keepalive": "60",
+    "cleansession": true
+  },
+  {
+    "id": "ep-a1",
+    "type": "OpcUa-Endpoint",
+    "endpoint": "opc.tcp://host.docker.internal:4841/jesa/a1",
+    "secpol": "None",
+    "secmode": "None",
+    "login": false,
+    "name": "A1 :4841"
+  },
+  {
+    "id": "ep-a2",
+    "type": "OpcUa-Endpoint",
+    "endpoint": "opc.tcp://host.docker.internal:4842/jesa/a2",
+    "secpol": "None",
+    "secmode": "None",
+    "login": false,
+    "name": "A2 :4842"
+  },
+  {
+    "id": "ep-a3",
+    "type": "OpcUa-Endpoint",
+    "endpoint": "opc.tcp://host.docker.internal:4843/jesa/a3",
+    "secpol": "None",
+    "secmode": "None",
+    "login": false,
+    "name": "A3 :4843"
+  },
+  {
+    "id": "ep-plc",
+    "type": "OpcUa-Endpoint",
+    "endpoint": "opc.tcp://host.docker.internal:4840/jesa/plc",
+    "secpol": "None",
+    "secmode": "None",
+    "login": false,
+    "name": "PLC :4840"
+  },
+  {
+    "id": "ui-tab-mon",
+    "type": "ui_tab",
+    "name": "JESA Gateway",
+    "icon": "dashboard",
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "ui-grp-health",
+    "type": "ui_group",
+    "name": "OPC UA Health",
+    "tab": "ui-tab-mon",
+    "order": 1,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "ui-grp-alarms",
+    "type": "ui_group",
+    "name": "Active Alarms",
+    "tab": "ui-tab-mon",
+    "order": 2,
+    "disp": true,
+    "width": "12",
+    "collapse": false
+  },
+  {
+    "id": "ui-grp-rate",
+    "type": "ui_group",
+    "name": "Message Rate",
+    "tab": "ui-tab-mon",
+    "order": 3,
+    "disp": true,
+    "width": "6",
+    "collapse": false
+  },
+  {
+    "id": "inj-1hz",
+    "type": "inject",
+    "z": "tab-gw",
+    "name": "1 Hz poll trigger",
+    "props": [
+      {
+        "p": "payload",
+        "v": "",
+        "vt": "date"
+      }
+    ],
+    "repeat": "1",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "3",
+    "topic": "",
+    "x": 110,
+    "y": 200,
+    "wires": [
+      [
+        "fn-rm-a1",
+        "fn-rm-a2",
+        "fn-rm-a3",
+        "fn-rm-plc"
+      ]
+    ]
+  },
+  {
+    "id": "fn-norm-a1",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Normalise + publish A1",
+    "func": "// contrib-opcua individual msg structure (confirmed):\n//   msg.topic      = \"ns=2;i=X\"      (nodeId string)\n//   msg.payload    = raw value        (number | boolean | string | Array)\n//   msg.statusCode = StatusCode obj or 0\n//   msg.serverTimestamp, msg.sourceTimestamp\nconst LOOKUP = {\"ns=2;i=3\": {\"f\": \"Identification\", \"n\": \"AssetId\"}, \"ns=2;i=4\": {\"f\": \"Identification\", \"n\": \"Description\"}, \"ns=2;i=6\": {\"f\": \"Simulation\", \"n\": \"SpeedFactor\"}, \"ns=2;i=25\": {\"f\": \"Simulation\", \"n\": \"PartIndex\"}, \"ns=2;i=8\": {\"f\": \"Part\", \"n\": \"ProductId\"}, \"ns=2;i=9\": {\"f\": \"Part\", \"n\": \"ProductType\"}, \"ns=2;i=11\": {\"f\": \"Process\", \"n\": \"AirTemperature_K\"}, \"ns=2;i=12\": {\"f\": \"Process\", \"n\": \"ProcessTemperature_K\"}, \"ns=2;i=14\": {\"f\": \"Drive\", \"n\": \"RotationalSpeed_rpm\"}, \"ns=2;i=15\": {\"f\": \"Drive\", \"n\": \"Torque_Nm\"}, \"ns=2;i=17\": {\"f\": \"Tool\", \"n\": \"ToolWear_min\"}, \"ns=2;i=19\": {\"f\": \"Status\", \"n\": \"MachineFailure\"}, \"ns=2;i=20\": {\"f\": \"Status\", \"n\": \"TWF\"}, \"ns=2;i=21\": {\"f\": \"Status\", \"n\": \"HDF\"}, \"ns=2;i=22\": {\"f\": \"Status\", \"n\": \"PWF\"}, \"ns=2;i=23\": {\"f\": \"Status\", \"n\": \"OSF\"}, \"ns=2;i=24\": {\"f\": \"Status\", \"n\": \"RNF\"}};\nconst AREA = 'workshop/milling', ASSET = 'A1', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\n\nconst nid = msg.topic || '';\nconst m   = LOOKUP[nid];\nif (!m) return null;  // unknown nodeId\n\n// statusCode is at msg level, not msg.payload level\nconst sc  = msg.statusCode ? (typeof msg.statusCode === 'object' ? (msg.statusCode.value || 0) : msg.statusCode) : 0;\nconst q   = (sc === 0) ? 'good' : 'uncertain';\n\n// payload IS the raw value (number, boolean, string, Array)\nlet val = msg.payload;\nif (Array.isArray(val)) val = val.length > 0 ? val[0] : null;  // e.g. timestamps\nif (typeof val === 'object' && val !== null) val = String(val);\n\nconst ts       = new Date().toISOString();\nconst topic    = `${PREFIX}/workshop/milling/A1/${toSnake(m.f)}/${toSnake(m.n)}`;\nconst retained = m.f === 'Identification' || (m.f === 'Simulation' && m.n === 'SpeedFactor');\n\n// Track topics for stale watchdog\nconst set = new Set(context.get('topics') || []);\nset.add(topic);\ncontext.set('topics', Array.from(set));\n\nflow.set('msgTotal', (flow.get('msgTotal') || 0) + 1);\nreturn [{ topic, payload: JSON.stringify({ts, v: val, q}), qos: retained ? 1 : 0, retain: retained }];",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 80,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "fn-norm-a2",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Normalise + publish A2",
+    "func": "// contrib-opcua individual msg structure (confirmed):\n//   msg.topic      = \"ns=2;i=X\"      (nodeId string)\n//   msg.payload    = raw value        (number | boolean | string | Array)\n//   msg.statusCode = StatusCode obj or 0\n//   msg.serverTimestamp, msg.sourceTimestamp\nconst LOOKUP = {\"ns=2;i=3\": {\"f\": \"Identification\", \"n\": \"AssetId\"}, \"ns=2;i=4\": {\"f\": \"Identification\", \"n\": \"Description\"}, \"ns=2;i=6\": {\"f\": \"Simulation\", \"n\": \"SpeedFactor\"}, \"ns=2;i=34\": {\"f\": \"Simulation\", \"n\": \"CycleIndex\"}, \"ns=2;i=35\": {\"f\": \"Simulation\", \"n\": \"CycleSecond\"}, \"ns=2;i=8\": {\"f\": \"Hydraulic\", \"n\": \"PS1_bar\"}, \"ns=2;i=9\": {\"f\": \"Hydraulic\", \"n\": \"PS2_bar\"}, \"ns=2;i=10\": {\"f\": \"Hydraulic\", \"n\": \"PS3_bar\"}, \"ns=2;i=11\": {\"f\": \"Hydraulic\", \"n\": \"PS4_bar\"}, \"ns=2;i=12\": {\"f\": \"Hydraulic\", \"n\": \"PS5_bar\"}, \"ns=2;i=13\": {\"f\": \"Hydraulic\", \"n\": \"PS6_bar\"}, \"ns=2;i=14\": {\"f\": \"Hydraulic\", \"n\": \"Flow1_lpm\"}, \"ns=2;i=15\": {\"f\": \"Hydraulic\", \"n\": \"Flow2_lpm\"}, \"ns=2;i=17\": {\"f\": \"Motor\", \"n\": \"Power_W\"}, \"ns=2;i=18\": {\"f\": \"Motor\", \"n\": \"Vibration_mms\"}, \"ns=2;i=20\": {\"f\": \"Thermal\", \"n\": \"TS1_C\"}, \"ns=2;i=21\": {\"f\": \"Thermal\", \"n\": \"TS2_C\"}, \"ns=2;i=22\": {\"f\": \"Thermal\", \"n\": \"TS3_C\"}, \"ns=2;i=23\": {\"f\": \"Thermal\", \"n\": \"TS4_C\"}, \"ns=2;i=25\": {\"f\": \"KPIs\", \"n\": \"CoolingEfficiency_pct\"}, \"ns=2;i=26\": {\"f\": \"KPIs\", \"n\": \"CoolingPower_kW\"}, \"ns=2;i=27\": {\"f\": \"KPIs\", \"n\": \"EfficiencyFactor_pct\"}, \"ns=2;i=29\": {\"f\": \"Condition\", \"n\": \"CoolerCondition_pct\"}, \"ns=2;i=30\": {\"f\": \"Condition\", \"n\": \"ValveCondition_pct\"}, \"ns=2;i=31\": {\"f\": \"Condition\", \"n\": \"PumpLeakage\"}, \"ns=2;i=32\": {\"f\": \"Condition\", \"n\": \"AccumulatorPressure_bar\"}, \"ns=2;i=33\": {\"f\": \"Condition\", \"n\": \"StableFlag\"}};\nconst AREA = 'workshop/hydraulics', ASSET = 'A2', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\n\nconst nid = msg.topic || '';\nconst m   = LOOKUP[nid];\nif (!m) return null;  // unknown nodeId\n\n// statusCode is at msg level, not msg.payload level\nconst sc  = msg.statusCode ? (typeof msg.statusCode === 'object' ? (msg.statusCode.value || 0) : msg.statusCode) : 0;\nconst q   = (sc === 0) ? 'good' : 'uncertain';\n\n// payload IS the raw value (number, boolean, string, Array)\nlet val = msg.payload;\nif (Array.isArray(val)) val = val.length > 0 ? val[0] : null;  // e.g. timestamps\nif (typeof val === 'object' && val !== null) val = String(val);\n\nconst ts       = new Date().toISOString();\nconst topic    = `${PREFIX}/workshop/hydraulics/A2/${toSnake(m.f)}/${toSnake(m.n)}`;\nconst retained = m.f === 'Identification' || (m.f === 'Simulation' && m.n === 'SpeedFactor');\n\n// Track topics for stale watchdog\nconst set = new Set(context.get('topics') || []);\nset.add(topic);\ncontext.set('topics', Array.from(set));\n\nflow.set('msgTotal', (flow.get('msgTotal') || 0) + 1);\nreturn [{ topic, payload: JSON.stringify({ts, v: val, q}), qos: retained ? 1 : 0, retain: retained }];",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 180,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "fn-norm-a3",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Normalise + publish A3",
+    "func": "// contrib-opcua individual msg structure (confirmed):\n//   msg.topic      = \"ns=2;i=X\"      (nodeId string)\n//   msg.payload    = raw value        (number | boolean | string | Array)\n//   msg.statusCode = StatusCode obj or 0\n//   msg.serverTimestamp, msg.sourceTimestamp\nconst LOOKUP = {\"ns=2;i=3\": {\"f\": \"Identification\", \"n\": \"AssetId\"}, \"ns=2;i=4\": {\"f\": \"Identification\", \"n\": \"Description\"}, \"ns=2;i=6\": {\"f\": \"Simulation\", \"n\": \"SpeedFactor\"}, \"ns=2;i=26\": {\"f\": \"Simulation\", \"n\": \"RowIndex\"}, \"ns=2;i=27\": {\"f\": \"Simulation\", \"n\": \"SourceTimestamp\"}, \"ns=2;i=8\": {\"f\": \"Pneumatic\", \"n\": \"TP2_bar\"}, \"ns=2;i=9\": {\"f\": \"Pneumatic\", \"n\": \"TP3_bar\"}, \"ns=2;i=10\": {\"f\": \"Pneumatic\", \"n\": \"H1_bar\"}, \"ns=2;i=11\": {\"f\": \"Pneumatic\", \"n\": \"DVPressure_bar\"}, \"ns=2;i=12\": {\"f\": \"Pneumatic\", \"n\": \"Reservoirs_bar\"}, \"ns=2;i=14\": {\"f\": \"Motor\", \"n\": \"Current_A\"}, \"ns=2;i=16\": {\"f\": \"Oil\", \"n\": \"Temperature_C\"}, \"ns=2;i=18\": {\"f\": \"Digital\", \"n\": \"COMP\"}, \"ns=2;i=19\": {\"f\": \"Digital\", \"n\": \"DVElectric\"}, \"ns=2;i=20\": {\"f\": \"Digital\", \"n\": \"Towers\"}, \"ns=2;i=21\": {\"f\": \"Digital\", \"n\": \"MPG\"}, \"ns=2;i=22\": {\"f\": \"Digital\", \"n\": \"LPS\"}, \"ns=2;i=23\": {\"f\": \"Digital\", \"n\": \"PressureSwitch\"}, \"ns=2;i=24\": {\"f\": \"Digital\", \"n\": \"OilLevel\"}, \"ns=2;i=25\": {\"f\": \"Digital\", \"n\": \"CaudalImpulses\"}};\nconst AREA = 'fleet/apu', ASSET = 'A3', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\n\nconst nid = msg.topic || '';\nconst m   = LOOKUP[nid];\nif (!m) return null;  // unknown nodeId\n\n// statusCode is at msg level, not msg.payload level\nconst sc  = msg.statusCode ? (typeof msg.statusCode === 'object' ? (msg.statusCode.value || 0) : msg.statusCode) : 0;\nconst q   = (sc === 0) ? 'good' : 'uncertain';\n\n// payload IS the raw value (number, boolean, string, Array)\nlet val = msg.payload;\nif (Array.isArray(val)) val = val.length > 0 ? val[0] : null;  // e.g. timestamps\nif (typeof val === 'object' && val !== null) val = String(val);\n\nconst ts       = new Date().toISOString();\nconst topic    = `${PREFIX}/fleet/apu/A3/${toSnake(m.f)}/${toSnake(m.n)}`;\nconst retained = m.f === 'Identification' || (m.f === 'Simulation' && m.n === 'SpeedFactor');\n\n// Track topics for stale watchdog\nconst set = new Set(context.get('topics') || []);\nset.add(topic);\ncontext.set('topics', Array.from(set));\n\nflow.set('msgTotal', (flow.get('msgTotal') || 0) + 1);\nreturn [{ topic, payload: JSON.stringify({ts, v: val, q}), qos: retained ? 1 : 0, retain: retained }];",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 280,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "fn-norm-plc",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Normalise + publish PLC",
+    "func": "// contrib-opcua individual msg structure (confirmed):\n//   msg.topic      = \"ns=2;i=X\"      (nodeId string)\n//   msg.payload    = raw value        (number | boolean | string | Array)\n//   msg.statusCode = StatusCode obj or 0\n//   msg.serverTimestamp, msg.sourceTimestamp\nconst LOOKUP = {\"ns=2;i=3\": {\"f\": \"System\", \"n\": \"Mode\"}, \"ns=2;i=4\": {\"f\": \"System\", \"n\": \"ScanCount\"}, \"ns=2;i=5\": {\"f\": \"System\", \"n\": \"ScanTimeMs\"}, \"ns=2;i=6\": {\"f\": \"System\", \"n\": \"ActiveAlarms\"}, \"ns=2;i=8\": {\"f\": \"A1\", \"n\": \"CommFault\"}, \"ns=2;i=9\": {\"f\": \"A1\", \"n\": \"Torque_Nm\"}, \"ns=2;i=10\": {\"f\": \"A1\", \"n\": \"Speed_rpm\"}, \"ns=2;i=11\": {\"f\": \"A1\", \"n\": \"ToolWear_min\"}, \"ns=2;i=12\": {\"f\": \"A1\", \"n\": \"Power_kW\"}, \"ns=2;i=13\": {\"f\": \"A1\", \"n\": \"ToolWearHigh\"}, \"ns=2;i=14\": {\"f\": \"A1\", \"n\": \"Overstrain\"}, \"ns=2;i=15\": {\"f\": \"A1\", \"n\": \"PowerOutOfRange\"}, \"ns=2;i=16\": {\"f\": \"A1\", \"n\": \"HeatDissipationRisk\"}, \"ns=2;i=17\": {\"f\": \"A1\", \"n\": \"StopCommand\"}, \"ns=2;i=19\": {\"f\": \"A2\", \"n\": \"CommFault\"}, \"ns=2;i=20\": {\"f\": \"A2\", \"n\": \"SystemPressure_bar\"}, \"ns=2;i=21\": {\"f\": \"A2\", \"n\": \"MotorPower_W\"}, \"ns=2;i=22\": {\"f\": \"A2\", \"n\": \"Vibration_mms\"}, \"ns=2;i=23\": {\"f\": \"A2\", \"n\": \"CoolingEfficiency_pct\"}, \"ns=2;i=24\": {\"f\": \"A2\", \"n\": \"CoolingDegraded\"}, \"ns=2;i=25\": {\"f\": \"A2\", \"n\": \"MotorOverload\"}, \"ns=2;i=26\": {\"f\": \"A2\", \"n\": \"VibrationHigh\"}, \"ns=2;i=27\": {\"f\": \"A2\", \"n\": \"MaintenanceRequired\"}, \"ns=2;i=29\": {\"f\": \"A3\", \"n\": \"CommFault\"}, \"ns=2;i=30\": {\"f\": \"A3\", \"n\": \"PanelPressure_bar\"}, \"ns=2;i=31\": {\"f\": \"A3\", \"n\": \"ReservoirPressure_bar\"}, \"ns=2;i=32\": {\"f\": \"A3\", \"n\": \"MotorCurrent_A\"}, \"ns=2;i=33\": {\"f\": \"A3\", \"n\": \"OilTemperature_C\"}, \"ns=2;i=34\": {\"f\": \"A3\", \"n\": \"CompressorRunning\"}, \"ns=2;i=35\": {\"f\": \"A3\", \"n\": \"LowPressure\"}, \"ns=2;i=36\": {\"f\": \"A3\", \"n\": \"OilTempHigh\"}, \"ns=2;i=37\": {\"f\": \"A3\", \"n\": \"OilLevelLow\"}, \"ns=2;i=38\": {\"f\": \"A3\", \"n\": \"AirSupplyOk\"}};\nconst AREA = 'plc', ASSET = 'PLC', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\n\nconst nid = msg.topic || '';\nconst m   = LOOKUP[nid];\nif (!m) return null;  // unknown nodeId\n\n// statusCode is at msg level, not msg.payload level\nconst sc  = msg.statusCode ? (typeof msg.statusCode === 'object' ? (msg.statusCode.value || 0) : msg.statusCode) : 0;\nconst q   = (sc === 0) ? 'good' : 'uncertain';\n\n// payload IS the raw value (number, boolean, string, Array)\nlet val = msg.payload;\nif (Array.isArray(val)) val = val.length > 0 ? val[0] : null;  // e.g. timestamps\nif (typeof val === 'object' && val !== null) val = String(val);\n\nconst ts       = new Date().toISOString();\nconst topic    = `${PREFIX}/${AREA}/${toSnake(m.f)}/${toSnake(m.n)}`;\nconst retained = m.f === 'System' && m.n === 'Mode';\n\n// Track topics for stale watchdog\nconst set = new Set(context.get('topics') || []);\nset.add(topic);\ncontext.set('topics', Array.from(set));\n\nflow.set('msgTotal', (flow.get('msgTotal') || 0) + 1);\nreturn [{ topic, payload: JSON.stringify({ts, v: val, q}), qos: 1, retain: retained }];",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 380,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-out-gw",
+    "type": "mqtt out",
+    "z": "tab-gw",
+    "name": "Ã¢â€ â€™ Mosquitto UNS",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "broker": "jesa-mqtt-broker",
+    "x": 820,
+    "y": 230,
+    "wires": []
+  },
+  {
+    "id": "fn-stale-a1",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Stale A1",
+    "func": "const META = [{\"f\": \"Identification\", \"n\": \"AssetId\"}, {\"f\": \"Identification\", \"n\": \"Description\"}, {\"f\": \"Simulation\", \"n\": \"SpeedFactor\"}, {\"f\": \"Simulation\", \"n\": \"PartIndex\"}, {\"f\": \"Part\", \"n\": \"ProductId\"}, {\"f\": \"Part\", \"n\": \"ProductType\"}, {\"f\": \"Process\", \"n\": \"AirTemperature_K\"}, {\"f\": \"Process\", \"n\": \"ProcessTemperature_K\"}, {\"f\": \"Drive\", \"n\": \"RotationalSpeed_rpm\"}, {\"f\": \"Drive\", \"n\": \"Torque_Nm\"}, {\"f\": \"Tool\", \"n\": \"ToolWear_min\"}, {\"f\": \"Status\", \"n\": \"MachineFailure\"}, {\"f\": \"Status\", \"n\": \"TWF\"}, {\"f\": \"Status\", \"n\": \"HDF\"}, {\"f\": \"Status\", \"n\": \"PWF\"}, {\"f\": \"Status\", \"n\": \"OSF\"}, {\"f\": \"Status\", \"n\": \"RNF\"}];\nconst AREA = 'workshop/milling', ASSET = 'A1', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\nconst ts = new Date().toISOString();\nconst topics = context.get('topics') || META.map(m => PREFIX+'/workshop/milling/A1/'+toSnake(m.f)+'/'+toSnake(m.n));\nnode.warn('A1 OPC UA stale - ' + topics.length + ' tags');\nreturn topics.map(t => ({ topic:t, payload:JSON.stringify({ts,v:null,q:'stale'}), qos:0, retain:false }));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 440,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "fn-stale-a2",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Stale A2",
+    "func": "const META = [{\"f\": \"Identification\", \"n\": \"AssetId\"}, {\"f\": \"Identification\", \"n\": \"Description\"}, {\"f\": \"Simulation\", \"n\": \"SpeedFactor\"}, {\"f\": \"Simulation\", \"n\": \"CycleIndex\"}, {\"f\": \"Simulation\", \"n\": \"CycleSecond\"}, {\"f\": \"Hydraulic\", \"n\": \"PS1_bar\"}, {\"f\": \"Hydraulic\", \"n\": \"PS2_bar\"}, {\"f\": \"Hydraulic\", \"n\": \"PS3_bar\"}, {\"f\": \"Hydraulic\", \"n\": \"PS4_bar\"}, {\"f\": \"Hydraulic\", \"n\": \"PS5_bar\"}, {\"f\": \"Hydraulic\", \"n\": \"PS6_bar\"}, {\"f\": \"Hydraulic\", \"n\": \"Flow1_lpm\"}, {\"f\": \"Hydraulic\", \"n\": \"Flow2_lpm\"}, {\"f\": \"Motor\", \"n\": \"Power_W\"}, {\"f\": \"Motor\", \"n\": \"Vibration_mms\"}, {\"f\": \"Thermal\", \"n\": \"TS1_C\"}, {\"f\": \"Thermal\", \"n\": \"TS2_C\"}, {\"f\": \"Thermal\", \"n\": \"TS3_C\"}, {\"f\": \"Thermal\", \"n\": \"TS4_C\"}, {\"f\": \"KPIs\", \"n\": \"CoolingEfficiency_pct\"}, {\"f\": \"KPIs\", \"n\": \"CoolingPower_kW\"}, {\"f\": \"KPIs\", \"n\": \"EfficiencyFactor_pct\"}, {\"f\": \"Condition\", \"n\": \"CoolerCondition_pct\"}, {\"f\": \"Condition\", \"n\": \"ValveCondition_pct\"}, {\"f\": \"Condition\", \"n\": \"PumpLeakage\"}, {\"f\": \"Condition\", \"n\": \"AccumulatorPressure_bar\"}, {\"f\": \"Condition\", \"n\": \"StableFlag\"}];\nconst AREA = 'workshop/hydraulics', ASSET = 'A2', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\nconst ts = new Date().toISOString();\nconst topics = context.get('topics') || META.map(m => PREFIX+'/workshop/hydraulics/A2/'+toSnake(m.f)+'/'+toSnake(m.n));\nnode.warn('A2 OPC UA stale - ' + topics.length + ' tags');\nreturn topics.map(t => ({ topic:t, payload:JSON.stringify({ts,v:null,q:'stale'}), qos:0, retain:false }));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 470,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "fn-stale-a3",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Stale A3",
+    "func": "const META = [{\"f\": \"Identification\", \"n\": \"AssetId\"}, {\"f\": \"Identification\", \"n\": \"Description\"}, {\"f\": \"Simulation\", \"n\": \"SpeedFactor\"}, {\"f\": \"Simulation\", \"n\": \"RowIndex\"}, {\"f\": \"Simulation\", \"n\": \"SourceTimestamp\"}, {\"f\": \"Pneumatic\", \"n\": \"TP2_bar\"}, {\"f\": \"Pneumatic\", \"n\": \"TP3_bar\"}, {\"f\": \"Pneumatic\", \"n\": \"H1_bar\"}, {\"f\": \"Pneumatic\", \"n\": \"DVPressure_bar\"}, {\"f\": \"Pneumatic\", \"n\": \"Reservoirs_bar\"}, {\"f\": \"Motor\", \"n\": \"Current_A\"}, {\"f\": \"Oil\", \"n\": \"Temperature_C\"}, {\"f\": \"Digital\", \"n\": \"COMP\"}, {\"f\": \"Digital\", \"n\": \"DVElectric\"}, {\"f\": \"Digital\", \"n\": \"Towers\"}, {\"f\": \"Digital\", \"n\": \"MPG\"}, {\"f\": \"Digital\", \"n\": \"LPS\"}, {\"f\": \"Digital\", \"n\": \"PressureSwitch\"}, {\"f\": \"Digital\", \"n\": \"OilLevel\"}, {\"f\": \"Digital\", \"n\": \"CaudalImpulses\"}];\nconst AREA = 'fleet/apu', ASSET = 'A3', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\nconst ts = new Date().toISOString();\nconst topics = context.get('topics') || META.map(m => PREFIX+'/fleet/apu/A3/'+toSnake(m.f)+'/'+toSnake(m.n));\nnode.warn('A3 OPC UA stale - ' + topics.length + ' tags');\nreturn topics.map(t => ({ topic:t, payload:JSON.stringify({ts,v:null,q:'stale'}), qos:0, retain:false }));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 500,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "fn-stale-plc",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "Stale PLC",
+    "func": "const META = [{\"f\": \"System\", \"n\": \"Mode\"}, {\"f\": \"System\", \"n\": \"ScanCount\"}, {\"f\": \"System\", \"n\": \"ScanTimeMs\"}, {\"f\": \"System\", \"n\": \"ActiveAlarms\"}, {\"f\": \"A1\", \"n\": \"CommFault\"}, {\"f\": \"A1\", \"n\": \"Torque_Nm\"}, {\"f\": \"A1\", \"n\": \"Speed_rpm\"}, {\"f\": \"A1\", \"n\": \"ToolWear_min\"}, {\"f\": \"A1\", \"n\": \"Power_kW\"}, {\"f\": \"A1\", \"n\": \"ToolWearHigh\"}, {\"f\": \"A1\", \"n\": \"Overstrain\"}, {\"f\": \"A1\", \"n\": \"PowerOutOfRange\"}, {\"f\": \"A1\", \"n\": \"HeatDissipationRisk\"}, {\"f\": \"A1\", \"n\": \"StopCommand\"}, {\"f\": \"A2\", \"n\": \"CommFault\"}, {\"f\": \"A2\", \"n\": \"SystemPressure_bar\"}, {\"f\": \"A2\", \"n\": \"MotorPower_W\"}, {\"f\": \"A2\", \"n\": \"Vibration_mms\"}, {\"f\": \"A2\", \"n\": \"CoolingEfficiency_pct\"}, {\"f\": \"A2\", \"n\": \"CoolingDegraded\"}, {\"f\": \"A2\", \"n\": \"MotorOverload\"}, {\"f\": \"A2\", \"n\": \"VibrationHigh\"}, {\"f\": \"A2\", \"n\": \"MaintenanceRequired\"}, {\"f\": \"A3\", \"n\": \"CommFault\"}, {\"f\": \"A3\", \"n\": \"PanelPressure_bar\"}, {\"f\": \"A3\", \"n\": \"ReservoirPressure_bar\"}, {\"f\": \"A3\", \"n\": \"MotorCurrent_A\"}, {\"f\": \"A3\", \"n\": \"OilTemperature_C\"}, {\"f\": \"A3\", \"n\": \"CompressorRunning\"}, {\"f\": \"A3\", \"n\": \"LowPressure\"}, {\"f\": \"A3\", \"n\": \"OilTempHigh\"}, {\"f\": \"A3\", \"n\": \"OilLevelLow\"}, {\"f\": \"A3\", \"n\": \"AirSupplyOk\"}];\nconst AREA = 'plc', ASSET = 'PLC', PREFIX = 'jesa/site1';\nconst ACRONYMS = {KPIs:'kpis',DVPressure:'dv_pressure',CoolingPower_kW:'cooling_power_kw'};\nfunction toSnake(n){for(const[k,v]of Object.entries(ACRONYMS))n=n.replaceAll(k,v);return n.replace(/([A-Z]+)([A-Z][a-z])/g,'$1_$2').replace(/([a-z\\d])([A-Z])/g,'$1_$2').replace(/__+/g,'_').toLowerCase();}\nconst ts = new Date().toISOString();\nconst topics = context.get('topics') || META.map(m => PREFIX+'/'+AREA+'/'+toSnake(m.f)+'/'+toSnake(m.n));\nnode.warn('PLC OPC UA stale - ' + topics.length + ' tags');\nreturn topics.map(t => ({ topic:t, payload:JSON.stringify({ts,v:null,q:'stale'}), qos:0, retain:false }));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 580,
+    "y": 530,
+    "wires": [
+      [
+        "mqtt-out-gw"
+      ]
+    ]
+  },
+  {
+    "id": "catch-gw",
+    "type": "catch",
+    "z": "tab-gw",
+    "name": "Catch all errors",
+    "scope": null,
+    "uncaught": false,
+    "x": 200,
+    "y": 2220,
+    "wires": [
+      [
+        "dbg-gw"
+      ]
+    ]
+  },
+  {
+    "id": "dbg-gw",
+    "type": "debug",
+    "z": "tab-gw",
+    "name": "Gateway errors",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 480,
+    "y": 2220,
+    "wires": []
+  },
+  {
+    "id": "mqtt-in-a1-der",
+    "type": "mqtt in",
+    "z": "tab-der",
+    "name": "A1 telemetry",
+    "topic": "jesa/site1/workshop/milling/A1/#",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "jesa-mqtt-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 120,
+    "y": 80,
+    "wires": [
+      [
+        "fn-der-a1"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-in-a2-der",
+    "type": "mqtt in",
+    "z": "tab-der",
+    "name": "A2 telemetry",
+    "topic": "jesa/site1/workshop/hydraulics/A2/#",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "jesa-mqtt-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 120,
+    "y": 260,
+    "wires": [
+      [
+        "fn-der-a2"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-in-a3-der",
+    "type": "mqtt in",
+    "z": "tab-der",
+    "name": "A3 telemetry",
+    "topic": "jesa/site1/fleet/apu/A3/#",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "jesa-mqtt-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 120,
+    "y": 440,
+    "wires": [
+      [
+        "fn-der-a3"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-out-der",
+    "type": "mqtt out",
+    "z": "tab-der",
+    "name": "Ã¢â€ â€™ UNS derived/",
+    "topic": "",
+    "qos": "0",
+    "retain": false,
+    "broker": "jesa-mqtt-broker",
+    "x": 820,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "catch-der",
+    "type": "catch",
+    "z": "tab-der",
+    "name": "Catch",
+    "scope": null,
+    "uncaught": false,
+    "x": 200,
+    "y": 600,
+    "wires": [
+      [
+        "dbg-der"
+      ]
+    ]
+  },
+  {
+    "id": "dbg-der",
+    "type": "debug",
+    "z": "tab-der",
+    "name": "Derived errors",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 460,
+    "y": 600,
+    "wires": []
+  },
+  {
+    "id": "fn-der-a1",
+    "type": "function",
+    "z": "tab-der",
+    "name": "A1 Ã¢â€ â€™ power_kw Ã‚Â· delta_t_k Ã‚Â· wear_torque Ã‚Â· flags",
+    "func": "const topic=msg.topic;\nconst p=msg.payload;\nif(!p||p.q==='stale'||p.v===null||p.v===undefined)return null;\nconst v=p.v;\nconst P='jesa/site1/workshop/milling/A1';\nconst s=flow.get('a1')||{};\nif(topic.endsWith('/drive/torque_nm'))              s.torque =Number(v);\nelse if(topic.endsWith('/drive/rotational_speed_rpm'))s.speed  =Number(v);\nelse if(topic.endsWith('/process/air_temperature_k')) s.air_t  =Number(v);\nelse if(topic.endsWith('/process/process_temperature_k'))s.proc_t=Number(v);\nelse if(topic.endsWith('/tool/tool_wear_min'))         s.wear   =Number(v);\nelse if(topic.endsWith('/part/product_type'))          {s.ptype =String(v); flow.set('a1',s); return null;}\nelse return null;\nflow.set('a1',s);\nconst ts=new Date().toISOString();\nconst out=[];\nif(s.torque!==undefined&&s.speed!==undefined){\n  const pw=s.torque*s.speed*2*Math.PI/60;\n  out.push({topic:`${P}/derived/power_kw`,payload:JSON.stringify({ts,v:+(pw/1000).toFixed(4),q:'good'}),qos:0,retain:false});\n  out.push({topic:`${P}/derived/power_out_of_range`,payload:JSON.stringify({ts,v:pw<3500||pw>9000,q:'good'}),qos:0,retain:false});\n}\nif(s.air_t!==undefined&&s.proc_t!==undefined){\n  const dt=s.proc_t-s.air_t;\n  out.push({topic:`${P}/derived/delta_t_k`,payload:JSON.stringify({ts,v:+dt.toFixed(3),q:'good'}),qos:0,retain:false});\n  out.push({topic:`${P}/derived/heat_dissipation_risk`,payload:JSON.stringify({ts,v:dt<8.6&&(s.speed||9999)<1380,q:'good'}),qos:0,retain:false});\n}\nif(s.wear!==undefined&&s.torque!==undefined){\n  const wt=s.wear*s.torque;\n  const limits={L:11000,M:12000,H:13000};\n  const lim=limits[s.ptype||'M']||12000;\n  out.push({topic:`${P}/derived/wear_torque`,payload:JSON.stringify({ts,v:+wt.toFixed(2),q:'good'}),qos:0,retain:false});\n  out.push({topic:`${P}/derived/overstrain`,payload:JSON.stringify({ts,v:wt>lim,limit:lim,wear_torque:+wt.toFixed(1),type:s.ptype||'M',q:'good'}),qos:0,retain:false});\n}\nreturn out.map(m=>({...m}));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 470,
+    "y": 80,
+    "wires": [
+      [
+        "mqtt-out-der"
+      ]
+    ]
+  },
+  {
+    "id": "fn-der-a2",
+    "type": "function",
+    "z": "tab-der",
+    "name": "A2 Ã¢â€ â€™ cooler_delta_t Ã‚Â· hydraulic_work Ã‚Â· efficiency_ratio",
+    "func": "const topic=msg.topic;\nconst p=msg.payload;\nif(!p||p.q==='stale'||p.v===null||p.v===undefined)return null;\nconst v=p.v;\nconst P='jesa/site1/workshop/hydraulics/A2';\nconst s=flow.get('a2')||{};\nif     (topic.endsWith('/thermal/ts1_c'))               s.ts1   =Number(v);\nelse if(topic.endsWith('/thermal/ts4_c'))               s.ts4   =Number(v);\nelse if(topic.endsWith('/hydraulic/ps1_bar'))           s.ps1   =Number(v);\nelse if(topic.endsWith('/hydraulic/flow1_lpm'))         s.flow1 =Number(v);\nelse if(topic.endsWith('/kpis/cooling_power_kw'))       s.cp_kw =Number(v);\nelse if(topic.endsWith('/motor/power_w'))               s.mot_w =Number(v);\nelse return null;\nflow.set('a2',s);\nconst ts=new Date().toISOString();\nconst out=[];\nif(s.ts1!==undefined&&s.ts4!==undefined)\n  out.push({topic:`${P}/derived/cooler_delta_t_c`,payload:JSON.stringify({ts,v:+(s.ts1-s.ts4).toFixed(3),q:'good'}),qos:0,retain:false});\nif(s.ps1!==undefined&&s.flow1!==undefined){\n  const hw=s.ps1*100000*(s.flow1/60000);\n  out.push({topic:`${P}/derived/hydraulic_work_w`,payload:JSON.stringify({ts,v:+hw.toFixed(2),q:'good'}),qos:0,retain:false});\n}\nif(s.cp_kw!==undefined&&s.mot_w!==undefined&&s.mot_w>0)\n  out.push({topic:`${P}/derived/thermal_efficiency_ratio`,payload:JSON.stringify({ts,v:+((s.cp_kw*1000)/s.mot_w).toFixed(4),q:'good'}),qos:0,retain:false});\nreturn out.map(m=>({...m}));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 470,
+    "y": 260,
+    "wires": [
+      [
+        "mqtt-out-der"
+      ]
+    ]
+  },
+  {
+    "id": "fn-der-a3",
+    "type": "function",
+    "z": "tab-der",
+    "name": "A3 Ã¢â€ â€™ comp_duty Ã‚Â· pressure_diff Ã‚Â· load_state",
+    "func": "const topic=msg.topic;\nconst p=msg.payload;\nif(!p||p.q==='stale'||p.v===null||p.v===undefined)return null;\nconst v=p.v;\nconst P='jesa/site1/fleet/apu/A3';\nconst MAX=300;\nconst s=flow.get('a3_s')||{};\nlet hist=flow.get('a3_hist')||[];\nif     (topic.endsWith('/digital/comp'))           s.comp=Number(v);\nelse if(topic.endsWith('/pneumatic/tp2_bar'))       s.tp2 =Number(v);\nelse if(topic.endsWith('/pneumatic/tp3_bar'))       s.tp3 =Number(v);\nelse if(topic.endsWith('/pneumatic/reservoirs_bar'))s.res =Number(v);\nelse if(topic.endsWith('/motor/current_a'))         s.cur =Number(v);\nelse return null;\nflow.set('a3_s',s);\nif(s.comp!==undefined){\n  hist.push({t:Date.now(),v:s.comp?1:0});\n  const cut=Date.now()-MAX*1000;\n  hist=hist.filter(e=>e.t>=cut);\n  flow.set('a3_hist',hist);\n}\nconst ts=new Date().toISOString();\nconst out=[];\nif(hist.length>=10){\n  const duty=hist.reduce((a,e)=>a+e.v,0)/hist.length*100;\n  out.push({topic:`${P}/derived/comp_duty_pct_5min`,payload:JSON.stringify({ts,v:+duty.toFixed(1),q:'good'}),qos:0,retain:false});\n}\nif(s.tp3!==undefined&&s.tp2!==undefined)\n  out.push({topic:`${P}/derived/pressure_differential_bar`,payload:JSON.stringify({ts,v:+(s.tp3-s.tp2).toFixed(3),q:'good'}),qos:0,retain:false});\nif(s.tp3!==undefined&&s.res!==undefined)\n  out.push({topic:`${P}/derived/tp3_reservoir_diff_bar`,payload:JSON.stringify({ts,v:+(s.tp3-s.res).toFixed(4),q:'good'}),qos:0,retain:false});\nif(s.cur!==undefined){\n  const st=s.cur<1?'idle':s.cur<5.5?'offload':s.cur<8.5?'load':'peak';\n  out.push({topic:`${P}/derived/load_state`,payload:JSON.stringify({ts,v:st,current_a:+s.cur.toFixed(3),q:'good'}),qos:0,retain:false});\n}\nreturn out.map(m=>({...m}));",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 470,
+    "y": 440,
+    "wires": [
+      [
+        "mqtt-out-der"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-in-all-alm",
+    "type": "mqtt in",
+    "z": "tab-alm",
+    "name": "All telemetry + derived",
+    "topic": "jesa/site1/#",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "jesa-mqtt-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 130,
+    "y": 160,
+    "wires": [
+      [
+        "fn-alm-engine"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-out-alm",
+    "type": "mqtt out",
+    "z": "tab-alm",
+    "name": "Ã¢â€ â€™ alarms/",
+    "topic": "",
+    "qos": "1",
+    "retain": false,
+    "broker": "jesa-mqtt-broker",
+    "x": 940,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "inj-alm-cfg",
+    "type": "inject",
+    "z": "tab-alm",
+    "name": "Publish alarm config on start",
+    "props": [
+      {
+        "p": "payload",
+        "v": "{}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "2",
+    "topic": "",
+    "x": 160,
+    "y": 340,
+    "wires": [
+      [
+        "fn-alm-cfg-publish"
+      ]
+    ]
+  },
+  {
+    "id": "fn-alm-cfg-publish",
+    "type": "function",
+    "z": "tab-alm",
+    "name": "Publish alarm limits Ã¢â€ â€™ UNS (retained)",
+    "func": "const LIMITS=global.get('ALARM_LIMITS')||{};\nconst ts=new Date().toISOString();\nreturn[{topic:'jesa/site1/system/alarm_config',payload:JSON.stringify({ts,v:LIMITS,q:'good'}),qos:1,retain:true}];",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 480,
+    "y": 340,
+    "wires": [
+      [
+        "mqtt-out-alm"
+      ]
+    ]
+  },
+  {
+    "id": "fn-alm-log",
+    "type": "function",
+    "z": "tab-alm",
+    "name": "Alarm event log",
+    "func": "let log=flow.get('alarm_log')||[];\nconst p=typeof msg.payload==='string'?JSON.parse(msg.payload):msg.payload;\nif(p&&p.level&&p.tag){log.unshift({ts:p.ts,tag:p.tag,level:p.level,severity:p.severity,value:p.value,limit:p.limit,unit:p.unit||'',msg:p.msg});}\nif(log.length>200)log=log.slice(0,200);\nflow.set('alarm_log',log);\nreturn null;",
+    "outputs": 0,
+    "noerr": 0,
+    "x": 760,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "catch-alm",
+    "type": "catch",
+    "z": "tab-alm",
+    "name": "Catch",
+    "scope": null,
+    "uncaught": false,
+    "x": 200,
+    "y": 500,
+    "wires": [
+      [
+        "dbg-alm"
+      ]
+    ]
+  },
+  {
+    "id": "dbg-alm",
+    "type": "debug",
+    "z": "tab-alm",
+    "name": "Alarm errors",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 460,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "fn-alm-engine",
+    "type": "function",
+    "z": "tab-alm",
+    "name": "ISA-18.2  HH/H/L/LL  Alarm Engine",
+    "func": "// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\n// ISA-18.2 Alarm Engine\n//   Ã‚Â· Four levels  : LL (critical-low) L (warn-low) H (warn-high) HH (critical-high)\n//   Ã‚Â· On-delay     : alarm confirmed after ON_DELAY consecutive exceedances\n//   Ã‚Â· Deadband     : clears only when value retreats DEADBAND_PCT% inside limit\n//   Ã‚Â· State machine: NORMAL Ã¢â€ â€™ PENDING Ã¢â€ â€™ ACTIVE Ã¢â€ â€™ CLEARING\n//   Ã‚Â· Per-tag state persisted in flow context (localfilesystem)\n//   Ã‚Â· Only publishes on state TRANSITIONS Ã¢â‚¬â€ not every scan\n// Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\nconst topic   = msg.topic;\nconst payload = msg.payload;\nif (!payload || payload.q === 'stale') return null;\nconst value = typeof payload.v === 'number' ? payload.v : null;\nif (value === null || !isFinite(value)) return null;\n\nconst LIMITS   = global.get('ALARM_LIMITS') || {};\nconst ON_DELAY = global.get('ALARM_ON_DELAY') || 2;\nconst DEADBAND = global.get('ALARM_DEADBAND_PCT') || 2.0;\n\n// Strip prefix\nconst key = topic.replace(/^jesa\\/site1\\//, '');\nconst limits = LIMITS[key];\nif (!limits) return null;\n\n// Per-tag state\nconst sk = 'alm_' + key.replace(/\\//g,'_');\nlet st = flow.get(sk) || { level:'NORMAL', pending:null, pendingN:0 };\n\n// Span + deadband\nconst nums = Object.values(limits).filter(x => x !== null && typeof x === 'number');\nconst span = nums.length >= 2 ? Math.max(...nums) - Math.min(...nums) : 100;\nconst db   = span * DEADBAND / 100;\n\nfunction exceedLevel(v, L) {\n    if (L.HH !== null && v > L.HH) return 'HH';\n    if (L.H  !== null && v > L.H)  return 'H';\n    if (L.LL !== null && v < L.LL) return 'LL';\n    if (L.L  !== null && v < L.L)  return 'L';\n    return 'NORMAL';\n}\nfunction shouldClear(v, cur, L) {\n    if (cur === 'HH' && L.HH !== null && v <= L.HH - db) return true;\n    if (cur === 'H'  && L.H  !== null && v <= L.H  - db) return true;\n    if (cur === 'LL' && L.LL !== null && v >= L.LL + db) return true;\n    if (cur === 'L'  && L.L  !== null && v >= L.L  + db) return true;\n    return false;\n}\n\nconst SEV = { HH:'critical', H:'warning', L:'warning', LL:'critical', NORMAL:'normal' };\nconst newLvl  = exceedLevel(value, limits);\nconst clearing = st.level !== 'NORMAL' && shouldClear(value, st.level, limits);\nconst ts = new Date().toISOString();\nlet changed = false;\nlet outLvl  = st.level;\n\nif (newLvl !== 'NORMAL') {\n    if (st.pending === newLvl) {\n        st.pendingN++;\n        if (st.pendingN >= ON_DELAY && st.level !== newLvl) {\n            outLvl = newLvl;\n            st.level = newLvl;\n            st.pending = null; st.pendingN = 0;\n            changed = true;\n        }\n    } else { st.pending = newLvl; st.pendingN = 1; }\n} else if (clearing) {\n    if (st.level !== 'NORMAL') {\n        outLvl = 'NORMAL';\n        st.level = 'NORMAL';\n        st.pending = null; st.pendingN = 0;\n        changed = true;\n    }\n} else {\n    st.pending = null; st.pendingN = 0;\n}\nflow.set(sk, st);\nif (!changed) return null;\n\n// Build topics\nconst parts    = key.split('/');\nconst tagSlug  = parts.slice(-1)[0];\nconst assetPath = parts.slice(0,-2).join('/');\nconst alarmTopic = `jesa/site1/${assetPath}/alarms/${tagSlug}`;\nconst lim = limits[outLvl] !== undefined ? limits[outLvl] : null;\nconst text = outLvl === 'NORMAL'\n    ? `${tagSlug} returned to normal range`\n    : `${tagSlug} ${outLvl}: ${value.toFixed(3)} ${limits.unit||''} (limit ${lim} ${limits.unit||''})`;\n\nnodeStatus = outLvl === 'NORMAL'\n    ? { fill:'green',  shape:'dot',  text: tagSlug + ' normal' }\n    : { fill: outLvl.includes('H') ? 'red' : 'yellow', shape:'ring',\n        text: `${tagSlug} ${outLvl} = ${value.toFixed(2)}` };\nnode.status(nodeStatus);\n\nconst body = { ts, level:outLvl, severity:SEV[outLvl], value:+value.toFixed(4),\n               limit:lim, unit:limits.unit||'', tag:key, msg:text, q:'good' };\nreturn [\n    { topic:alarmTopic,                      payload:JSON.stringify(body), qos:1, retain:false },\n    { topic:'jesa/site1/system/alarms/active', payload:JSON.stringify(body), qos:1, retain:false },\n];",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 470,
+    "y": 160,
+    "wires": [
+      [
+        "fn-alm-log",
+        "mqtt-out-alm"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-in-sys-mon",
+    "type": "mqtt in",
+    "z": "tab-mon",
+    "name": "System topics",
+    "topic": "jesa/site1/system/#",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "jesa-mqtt-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 130,
+    "y": 120,
+    "wires": [
+      [
+        "fn-mon-route"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-in-alm-mon",
+    "type": "mqtt in",
+    "z": "tab-mon",
+    "name": "All alarms",
+    "topic": "jesa/site1/+/+/+/alarms/#",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "jesa-mqtt-broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 130,
+    "y": 200,
+    "wires": [
+      [
+        "fn-mon-alarm-table"
+      ]
+    ]
+  },
+  {
+    "id": "fn-mon-route",
+    "type": "function",
+    "z": "tab-mon",
+    "name": "Route system msgs",
+    "func": "const t=msg.topic;\nif(t.includes('nodered/status'))  { node.send([msg,null,null]); return; }\nif(t.includes('alarm_config'))    { node.send([null,msg,null]); return; }\nif(t.includes('alarms/active'))   { node.send([null,null,msg]); return; }\nreturn null;",
+    "outputs": 3,
+    "noerr": 0,
+    "x": 380,
+    "y": 120,
+    "wires": [
+      [
+        "ui-txt-gw-status"
+      ],
+      [
+        "fn-alm-cfg-table"
+      ],
+      [
+        "fn-mon-alarm-table"
+      ]
+    ]
+  },
+  {
+    "id": "fn-mon-alarm-table",
+    "type": "function",
+    "z": "tab-mon",
+    "name": "Format alarm for table",
+    "func": "const p=typeof msg.payload==='string'?JSON.parse(msg.payload):msg.payload;\nif(!p||!p.tag)return null;\nmsg.payload={ts:p.ts,tag:p.tag,level:p.level,severity:p.severity,value:p.value,limit:p.limit,unit:p.unit||'',msg:p.msg};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 600,
+    "y": 200,
+    "wires": [
+      [
+        "ui-tbl-alarms"
+      ]
+    ]
+  },
+  {
+    "id": "fn-alm-cfg-table",
+    "type": "function",
+    "z": "tab-mon",
+    "name": "Format alarm config",
+    "func": "const cfg=(msg.payload&&msg.payload.v)?msg.payload.v:{};\nmsg.payload=Object.entries(cfg).map(([tag,l])=>({tag,LL:l.LL!==null?l.LL:'Ã¢â‚¬â€',L:l.L!==null?l.L:'Ã¢â‚¬â€',H:l.H!==null?l.H:'Ã¢â‚¬â€',HH:l.HH!==null?l.HH:'Ã¢â‚¬â€',unit:l.unit||''}));\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 600,
+    "y": 160,
+    "wires": [
+      [
+        "ui-tbl-cfg"
+      ]
+    ]
+  },
+  {
+    "id": "inj-rate",
+    "type": "inject",
+    "z": "tab-mon",
+    "name": "Rate 5s",
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 130,
+    "y": 340,
+    "wires": [
+      [
+        "fn-rate"
+      ]
+    ]
+  },
+  {
+    "id": "fn-rate",
+    "type": "function",
+    "z": "tab-mon",
+    "name": "msg/s",
+    "func": "const now=Date.now();\nconst prevT=context.get('prevT')||now;\nconst prevC=context.get('prevC')||0;\nconst total=flow.get('msgTotal')||0;\nconst rate=(total-prevC)/((now-prevT)/1000||1);\ncontext.set('prevT',now);\ncontext.set('prevC',total);\nmsg.payload=+rate.toFixed(1);\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 340,
+    "y": 340,
+    "wires": [
+      [
+        "ui-gauge-rate"
+      ]
+    ]
+  },
+  {
+    "id": "ui-txt-gw-status",
+    "type": "ui_text",
+    "z": "tab-mon",
+    "group": "ui-grp-health",
+    "order": 1,
+    "width": "4",
+    "height": "1",
+    "name": "GW Status",
+    "label": "Node-RED Gateway",
+    "format": "{{msg.payload.v}}",
+    "layout": "row-spread",
+    "x": 700,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "ui-tbl-alarms",
+    "type": "ui_table",
+    "z": "tab-mon",
+    "group": "ui-grp-alarms",
+    "name": "Active Alarms",
+    "order": 1,
+    "width": "12",
+    "height": "8",
+    "columns": [
+      {
+        "field": "ts",
+        "title": "Time",
+        "width": "170",
+        "align": "left",
+        "formatter": "text"
+      },
+      {
+        "field": "tag",
+        "title": "Tag",
+        "width": "auto",
+        "align": "left",
+        "formatter": "text"
+      },
+      {
+        "field": "level",
+        "title": "Level",
+        "width": "60",
+        "align": "center",
+        "formatter": "text"
+      },
+      {
+        "field": "value",
+        "title": "Value",
+        "width": "80",
+        "align": "right",
+        "formatter": "text"
+      },
+      {
+        "field": "limit",
+        "title": "Limit",
+        "width": "70",
+        "align": "right",
+        "formatter": "text"
+      },
+      {
+        "field": "unit",
+        "title": "Unit",
+        "width": "60",
+        "align": "left",
+        "formatter": "text"
+      },
+      {
+        "field": "msg",
+        "title": "Message",
+        "width": "auto",
+        "align": "left",
+        "formatter": "text"
+      }
+    ],
+    "outputs": 0,
+    "x": 820,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "ui-tbl-cfg",
+    "type": "ui_table",
+    "z": "tab-mon",
+    "group": "ui-grp-alarms",
+    "name": "Alarm Config",
+    "order": 2,
+    "width": "12",
+    "height": "8",
+    "columns": [
+      {
+        "field": "tag",
+        "title": "Tag Path",
+        "width": "auto",
+        "align": "left",
+        "formatter": "text"
+      },
+      {
+        "field": "LL",
+        "title": "LL",
+        "width": "80",
+        "align": "right",
+        "formatter": "text"
+      },
+      {
+        "field": "L",
+        "title": "L",
+        "width": "80",
+        "align": "right",
+        "formatter": "text"
+      },
+      {
+        "field": "H",
+        "title": "H",
+        "width": "80",
+        "align": "right",
+        "formatter": "text"
+      },
+      {
+        "field": "HH",
+        "title": "HH",
+        "width": "80",
+        "align": "right",
+        "formatter": "text"
+      },
+      {
+        "field": "unit",
+        "title": "Unit",
+        "width": "80",
+        "align": "left",
+        "formatter": "text"
+      }
+    ],
+    "outputs": 0,
+    "x": 820,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "ui-gauge-rate",
+    "type": "ui_gauge",
+    "z": "tab-mon",
+    "group": "ui-grp-rate",
+    "order": 1,
+    "width": "6",
+    "height": "4",
+    "gtype": "gage",
+    "title": "MQTT msg/s",
+    "label": "msg/s",
+    "format": "{{value}}",
+    "min": "0",
+    "max": "150",
+    "colors": [
+      "#00b500",
+      "#e6e600",
+      "#ca3838"
+    ],
+    "seg1": "80",
+    "seg2": "120",
+    "x": 560,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "catch-mon",
+    "type": "catch",
+    "z": "tab-mon",
+    "name": "Catch",
+    "scope": null,
+    "uncaught": false,
+    "x": 200,
+    "y": 500,
+    "wires": [
+      [
+        "dbg-mon"
+      ]
+    ]
+  },
+  {
+    "id": "dbg-mon",
+    "type": "debug",
+    "z": "tab-mon",
+    "name": "Monitor errors",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 460,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "fn-rm-a1",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "ReadMultiple A1",
+    "func": "const META = [{\"f\": \"Identification\", \"n\": \"AssetId\", \"i\": 3}, {\"f\": \"Identification\", \"n\": \"Description\", \"i\": 4}, {\"f\": \"Simulation\", \"n\": \"SpeedFactor\", \"i\": 6}, {\"f\": \"Simulation\", \"n\": \"PartIndex\", \"i\": 25}, {\"f\": \"Part\", \"n\": \"ProductId\", \"i\": 8}, {\"f\": \"Part\", \"n\": \"ProductType\", \"i\": 9}, {\"f\": \"Process\", \"n\": \"AirTemperature_K\", \"i\": 11}, {\"f\": \"Process\", \"n\": \"ProcessTemperature_K\", \"i\": 12}, {\"f\": \"Drive\", \"n\": \"RotationalSpeed_rpm\", \"i\": 14}, {\"f\": \"Drive\", \"n\": \"Torque_Nm\", \"i\": 15}, {\"f\": \"Tool\", \"n\": \"ToolWear_min\", \"i\": 17}, {\"f\": \"Status\", \"n\": \"MachineFailure\", \"i\": 19}, {\"f\": \"Status\", \"n\": \"TWF\", \"i\": 20}, {\"f\": \"Status\", \"n\": \"HDF\", \"i\": 21}, {\"f\": \"Status\", \"n\": \"PWF\", \"i\": 22}, {\"f\": \"Status\", \"n\": \"OSF\", \"i\": 23}, {\"f\": \"Status\", \"n\": \"RNF\", \"i\": 24}];\ncontext.set('meta_a1', META);\nmsg.topic   = 'readmultiple';\nmsg.payload = [\"ns=2;i=3\", \"ns=2;i=4\", \"ns=2;i=6\", \"ns=2;i=25\", \"ns=2;i=8\", \"ns=2;i=9\", \"ns=2;i=11\", \"ns=2;i=12\", \"ns=2;i=14\", \"ns=2;i=15\", \"ns=2;i=17\", \"ns=2;i=19\", \"ns=2;i=20\", \"ns=2;i=21\", \"ns=2;i=22\", \"ns=2;i=23\", \"ns=2;i=24\"];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 110,
+    "y": 80,
+    "wires": [
+      [
+        "opc-read-a1"
+      ]
+    ]
+  },
+  {
+    "id": "opc-read-a1",
+    "type": "OpcUa-Client",
+    "z": "tab-gw",
+    "name": "Read A1",
+    "endpoint": "ep-a1",
+    "action": "readmultiple",
+    "deadbandtype": "a",
+    "deadbandvalue": "1",
+    "time": "1",
+    "timeUnit": "s",
+    "certificate": "n",
+    "localfile": "",
+    "localkeyfile": "",
+    "securitymode": "None",
+    "securitypolicy": "None",
+    "useTransport": false,
+    "maxChunkCount": "",
+    "maxMessageSize": "",
+    "receiveBufferSize": "",
+    "sendBufferSize": "",
+    "x": 330,
+    "y": 80,
+    "wires": [
+      [
+        "fn-norm-a1"
+      ],
+      [
+        "fn-stale-a1"
+      ]
+    ]
+  },
+  {
+    "id": "fn-rm-a2",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "ReadMultiple A2",
+    "func": "const META = [{\"f\": \"Identification\", \"n\": \"AssetId\", \"i\": 3}, {\"f\": \"Identification\", \"n\": \"Description\", \"i\": 4}, {\"f\": \"Simulation\", \"n\": \"SpeedFactor\", \"i\": 6}, {\"f\": \"Simulation\", \"n\": \"CycleIndex\", \"i\": 34}, {\"f\": \"Simulation\", \"n\": \"CycleSecond\", \"i\": 35}, {\"f\": \"Hydraulic\", \"n\": \"PS1_bar\", \"i\": 8}, {\"f\": \"Hydraulic\", \"n\": \"PS2_bar\", \"i\": 9}, {\"f\": \"Hydraulic\", \"n\": \"PS3_bar\", \"i\": 10}, {\"f\": \"Hydraulic\", \"n\": \"PS4_bar\", \"i\": 11}, {\"f\": \"Hydraulic\", \"n\": \"PS5_bar\", \"i\": 12}, {\"f\": \"Hydraulic\", \"n\": \"PS6_bar\", \"i\": 13}, {\"f\": \"Hydraulic\", \"n\": \"Flow1_lpm\", \"i\": 14}, {\"f\": \"Hydraulic\", \"n\": \"Flow2_lpm\", \"i\": 15}, {\"f\": \"Motor\", \"n\": \"Power_W\", \"i\": 17}, {\"f\": \"Motor\", \"n\": \"Vibration_mms\", \"i\": 18}, {\"f\": \"Thermal\", \"n\": \"TS1_C\", \"i\": 20}, {\"f\": \"Thermal\", \"n\": \"TS2_C\", \"i\": 21}, {\"f\": \"Thermal\", \"n\": \"TS3_C\", \"i\": 22}, {\"f\": \"Thermal\", \"n\": \"TS4_C\", \"i\": 23}, {\"f\": \"KPIs\", \"n\": \"CoolingEfficiency_pct\", \"i\": 25}, {\"f\": \"KPIs\", \"n\": \"CoolingPower_kW\", \"i\": 26}, {\"f\": \"KPIs\", \"n\": \"EfficiencyFactor_pct\", \"i\": 27}, {\"f\": \"Condition\", \"n\": \"CoolerCondition_pct\", \"i\": 29}, {\"f\": \"Condition\", \"n\": \"ValveCondition_pct\", \"i\": 30}, {\"f\": \"Condition\", \"n\": \"PumpLeakage\", \"i\": 31}, {\"f\": \"Condition\", \"n\": \"AccumulatorPressure_bar\", \"i\": 32}, {\"f\": \"Condition\", \"n\": \"StableFlag\", \"i\": 33}];\ncontext.set('meta_a2', META);\nmsg.topic   = 'readmultiple';\nmsg.payload = [\"ns=2;i=3\", \"ns=2;i=4\", \"ns=2;i=6\", \"ns=2;i=34\", \"ns=2;i=35\", \"ns=2;i=8\", \"ns=2;i=9\", \"ns=2;i=10\", \"ns=2;i=11\", \"ns=2;i=12\", \"ns=2;i=13\", \"ns=2;i=14\", \"ns=2;i=15\", \"ns=2;i=17\", \"ns=2;i=18\", \"ns=2;i=20\", \"ns=2;i=21\", \"ns=2;i=22\", \"ns=2;i=23\", \"ns=2;i=25\", \"ns=2;i=26\", \"ns=2;i=27\", \"ns=2;i=29\", \"ns=2;i=30\", \"ns=2;i=31\", \"ns=2;i=32\", \"ns=2;i=33\"];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 110,
+    "y": 180,
+    "wires": [
+      [
+        "opc-read-a2"
+      ]
+    ]
+  },
+  {
+    "id": "opc-read-a2",
+    "type": "OpcUa-Client",
+    "z": "tab-gw",
+    "name": "Read A2",
+    "endpoint": "ep-a2",
+    "action": "readmultiple",
+    "deadbandtype": "a",
+    "deadbandvalue": "1",
+    "time": "1",
+    "timeUnit": "s",
+    "certificate": "n",
+    "localfile": "",
+    "localkeyfile": "",
+    "securitymode": "None",
+    "securitypolicy": "None",
+    "useTransport": false,
+    "maxChunkCount": "",
+    "maxMessageSize": "",
+    "receiveBufferSize": "",
+    "sendBufferSize": "",
+    "x": 330,
+    "y": 180,
+    "wires": [
+      [
+        "fn-norm-a2"
+      ],
+      [
+        "fn-stale-a2"
+      ]
+    ]
+  },
+  {
+    "id": "fn-rm-a3",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "ReadMultiple A3",
+    "func": "const META = [{\"f\": \"Identification\", \"n\": \"AssetId\", \"i\": 3}, {\"f\": \"Identification\", \"n\": \"Description\", \"i\": 4}, {\"f\": \"Simulation\", \"n\": \"SpeedFactor\", \"i\": 6}, {\"f\": \"Simulation\", \"n\": \"RowIndex\", \"i\": 26}, {\"f\": \"Simulation\", \"n\": \"SourceTimestamp\", \"i\": 27}, {\"f\": \"Pneumatic\", \"n\": \"TP2_bar\", \"i\": 8}, {\"f\": \"Pneumatic\", \"n\": \"TP3_bar\", \"i\": 9}, {\"f\": \"Pneumatic\", \"n\": \"H1_bar\", \"i\": 10}, {\"f\": \"Pneumatic\", \"n\": \"DVPressure_bar\", \"i\": 11}, {\"f\": \"Pneumatic\", \"n\": \"Reservoirs_bar\", \"i\": 12}, {\"f\": \"Motor\", \"n\": \"Current_A\", \"i\": 14}, {\"f\": \"Oil\", \"n\": \"Temperature_C\", \"i\": 16}, {\"f\": \"Digital\", \"n\": \"COMP\", \"i\": 18}, {\"f\": \"Digital\", \"n\": \"DVElectric\", \"i\": 19}, {\"f\": \"Digital\", \"n\": \"Towers\", \"i\": 20}, {\"f\": \"Digital\", \"n\": \"MPG\", \"i\": 21}, {\"f\": \"Digital\", \"n\": \"LPS\", \"i\": 22}, {\"f\": \"Digital\", \"n\": \"PressureSwitch\", \"i\": 23}, {\"f\": \"Digital\", \"n\": \"OilLevel\", \"i\": 24}, {\"f\": \"Digital\", \"n\": \"CaudalImpulses\", \"i\": 25}];\ncontext.set('meta_a3', META);\nmsg.topic   = 'readmultiple';\nmsg.payload = [\"ns=2;i=3\", \"ns=2;i=4\", \"ns=2;i=6\", \"ns=2;i=26\", \"ns=2;i=27\", \"ns=2;i=8\", \"ns=2;i=9\", \"ns=2;i=10\", \"ns=2;i=11\", \"ns=2;i=12\", \"ns=2;i=14\", \"ns=2;i=16\", \"ns=2;i=18\", \"ns=2;i=19\", \"ns=2;i=20\", \"ns=2;i=21\", \"ns=2;i=22\", \"ns=2;i=23\", \"ns=2;i=24\", \"ns=2;i=25\"];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 110,
+    "y": 280,
+    "wires": [
+      [
+        "opc-read-a3"
+      ]
+    ]
+  },
+  {
+    "id": "opc-read-a3",
+    "type": "OpcUa-Client",
+    "z": "tab-gw",
+    "name": "Read A3",
+    "endpoint": "ep-a3",
+    "action": "readmultiple",
+    "deadbandtype": "a",
+    "deadbandvalue": "1",
+    "time": "1",
+    "timeUnit": "s",
+    "certificate": "n",
+    "localfile": "",
+    "localkeyfile": "",
+    "securitymode": "None",
+    "securitypolicy": "None",
+    "useTransport": false,
+    "maxChunkCount": "",
+    "maxMessageSize": "",
+    "receiveBufferSize": "",
+    "sendBufferSize": "",
+    "x": 330,
+    "y": 280,
+    "wires": [
+      [
+        "fn-norm-a3"
+      ],
+      [
+        "fn-stale-a3"
+      ]
+    ]
+  },
+  {
+    "id": "fn-rm-plc",
+    "type": "function",
+    "z": "tab-gw",
+    "name": "ReadMultiple PLC",
+    "func": "const META = [{\"f\": \"System\", \"n\": \"Mode\", \"i\": 3}, {\"f\": \"System\", \"n\": \"ScanCount\", \"i\": 4}, {\"f\": \"System\", \"n\": \"ScanTimeMs\", \"i\": 5}, {\"f\": \"System\", \"n\": \"ActiveAlarms\", \"i\": 6}, {\"f\": \"A1\", \"n\": \"CommFault\", \"i\": 8}, {\"f\": \"A1\", \"n\": \"Torque_Nm\", \"i\": 9}, {\"f\": \"A1\", \"n\": \"Speed_rpm\", \"i\": 10}, {\"f\": \"A1\", \"n\": \"ToolWear_min\", \"i\": 11}, {\"f\": \"A1\", \"n\": \"Power_kW\", \"i\": 12}, {\"f\": \"A1\", \"n\": \"ToolWearHigh\", \"i\": 13}, {\"f\": \"A1\", \"n\": \"Overstrain\", \"i\": 14}, {\"f\": \"A1\", \"n\": \"PowerOutOfRange\", \"i\": 15}, {\"f\": \"A1\", \"n\": \"HeatDissipationRisk\", \"i\": 16}, {\"f\": \"A1\", \"n\": \"StopCommand\", \"i\": 17}, {\"f\": \"A2\", \"n\": \"CommFault\", \"i\": 19}, {\"f\": \"A2\", \"n\": \"SystemPressure_bar\", \"i\": 20}, {\"f\": \"A2\", \"n\": \"MotorPower_W\", \"i\": 21}, {\"f\": \"A2\", \"n\": \"Vibration_mms\", \"i\": 22}, {\"f\": \"A2\", \"n\": \"CoolingEfficiency_pct\", \"i\": 23}, {\"f\": \"A2\", \"n\": \"CoolingDegraded\", \"i\": 24}, {\"f\": \"A2\", \"n\": \"MotorOverload\", \"i\": 25}, {\"f\": \"A2\", \"n\": \"VibrationHigh\", \"i\": 26}, {\"f\": \"A2\", \"n\": \"MaintenanceRequired\", \"i\": 27}, {\"f\": \"A3\", \"n\": \"CommFault\", \"i\": 29}, {\"f\": \"A3\", \"n\": \"PanelPressure_bar\", \"i\": 30}, {\"f\": \"A3\", \"n\": \"ReservoirPressure_bar\", \"i\": 31}, {\"f\": \"A3\", \"n\": \"MotorCurrent_A\", \"i\": 32}, {\"f\": \"A3\", \"n\": \"OilTemperature_C\", \"i\": 33}, {\"f\": \"A3\", \"n\": \"CompressorRunning\", \"i\": 34}, {\"f\": \"A3\", \"n\": \"LowPressure\", \"i\": 35}, {\"f\": \"A3\", \"n\": \"OilTempHigh\", \"i\": 36}, {\"f\": \"A3\", \"n\": \"OilLevelLow\", \"i\": 37}, {\"f\": \"A3\", \"n\": \"AirSupplyOk\", \"i\": 38}];\ncontext.set('meta_plc', META);\nmsg.topic   = 'readmultiple';\nmsg.payload = [\"ns=2;i=3\", \"ns=2;i=4\", \"ns=2;i=5\", \"ns=2;i=6\", \"ns=2;i=8\", \"ns=2;i=9\", \"ns=2;i=10\", \"ns=2;i=11\", \"ns=2;i=12\", \"ns=2;i=13\", \"ns=2;i=14\", \"ns=2;i=15\", \"ns=2;i=16\", \"ns=2;i=17\", \"ns=2;i=19\", \"ns=2;i=20\", \"ns=2;i=21\", \"ns=2;i=22\", \"ns=2;i=23\", \"ns=2;i=24\", \"ns=2;i=25\", \"ns=2;i=26\", \"ns=2;i=27\", \"ns=2;i=29\", \"ns=2;i=30\", \"ns=2;i=31\", \"ns=2;i=32\", \"ns=2;i=33\", \"ns=2;i=34\", \"ns=2;i=35\", \"ns=2;i=36\", \"ns=2;i=37\", \"ns=2;i=38\"];\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 110,
+    "y": 380,
+    "wires": [
+      [
+        "opc-read-plc"
+      ]
+    ]
+  },
+  {
+    "id": "opc-read-plc",
+    "type": "OpcUa-Client",
+    "z": "tab-gw",
+    "name": "Read PLC",
+    "endpoint": "ep-plc",
+    "action": "readmultiple",
+    "deadbandtype": "a",
+    "deadbandvalue": "1",
+    "time": "1",
+    "timeUnit": "s",
+    "certificate": "n",
+    "localfile": "",
+    "localkeyfile": "",
+    "securitymode": "None",
+    "securitypolicy": "None",
+    "useTransport": false,
+    "maxChunkCount": "",
+    "maxMessageSize": "",
+    "receiveBufferSize": "",
+    "sendBufferSize": "",
+    "x": 330,
+    "y": 380,
+    "wires": [
+      [
+        "fn-norm-plc"
+      ],
+      [
+        "fn-stale-plc"
+      ]
+    ]
+  }
+]

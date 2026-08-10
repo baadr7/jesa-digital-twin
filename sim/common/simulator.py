@@ -13,10 +13,11 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
 
-from asyncua import Server
+from asyncua.server.server import Server
 
 from sim.config import AssetConfig
 
@@ -70,6 +71,7 @@ class AssetSimulator(abc.ABC):
         await server.init()
         server.set_endpoint(self.endpoint)
         server.set_server_name(f"JESA Sim {self.cfg.asset_id}")
+        self._patch_endpoint_discovery(server)
         idx = await server.register_namespace(self.namespace_uri)
 
         asset_obj = await server.nodes.objects.add_object(idx, self.cfg.asset_id)
@@ -87,6 +89,23 @@ class AssetSimulator(abc.ABC):
             self._nodes[tag.key] = node
 
         self._server = server
+
+    @staticmethod
+    def _patch_endpoint_discovery(server: Server) -> None:
+        advertise = os.environ.get("JESA_OPCUA_ADVERTISE_HOST", "host.docker.internal")
+        if "0.0.0.0" not in (server.endpoint.netloc if hasattr(server.endpoint, "netloc") else ""):
+            return
+        _orig = server.get_endpoints
+
+        async def _patched(*args, **kwargs):
+            eps = await _orig(*args, **kwargs)
+            for ep in eps:
+                url = getattr(ep, "EndpointUrl", None)
+                if url and "0.0.0.0" in url:
+                    ep.EndpointUrl = url.replace("0.0.0.0", advertise)
+            return eps
+
+        server.get_endpoints = _patched
 
     async def _write(self, values: dict[str, Any]) -> None:
         casts = self._casts
@@ -112,6 +131,26 @@ class AssetSimulator(abc.ABC):
 
     # -------------------------------------------------------------------- run
 
+    async def _endpoint_advertise_task(self) -> None:
+        advertise = os.environ.get("JESA_OPCUA_ADVERTISE_HOST", "host.docker.internal")
+        server = self._server
+        assert server is not None
+        try:
+            if hasattr(server, "set_match_discovery_endpoint_url"):
+                server.set_match_discovery_endpoint_url(False)
+        except Exception:
+            pass
+        while True:
+            try:
+                eps = await server.get_endpoints()
+                for e in eps:
+                    url = getattr(e, "EndpointUrl", None)
+                    if url and "0.0.0.0" in url:
+                        e.EndpointUrl = url.replace("0.0.0.0", advertise)
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
     async def run(self) -> None:
         await self._build_address_space()
         assert self._server is not None
@@ -121,15 +160,17 @@ class AssetSimulator(abc.ABC):
         )
         loop = asyncio.get_running_loop()
         async with self._server:
-            deadline = loop.time()
-            async for values, dataset_dt in self.samples():
-                await self._write(values)
-                deadline += dataset_dt / self.speed
-                delay = deadline - loop.time()
-                if delay > 0:
-                    await asyncio.sleep(delay)
-                else:
-                    # Writer cannot keep up at this speed; resynchronize
-                    # instead of accumulating debt.
-                    deadline = loop.time()
-                    await asyncio.sleep(0)
+            adv_task = asyncio.create_task(self._endpoint_advertise_task())
+            try:
+                deadline = loop.time()
+                async for values, dataset_dt in self.samples():
+                    await self._write(values)
+                    deadline += dataset_dt / self.speed
+                    delay = deadline - loop.time()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    else:
+                        deadline = loop.time()
+                        await asyncio.sleep(0)
+            finally:
+                adv_task.cancel()

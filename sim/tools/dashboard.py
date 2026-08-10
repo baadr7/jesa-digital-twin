@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from aiohttp import web
-from asyncua import Client
+from asyncua.client.client import Client
 
 from sim import config
 

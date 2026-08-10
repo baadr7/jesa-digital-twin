@@ -1,0 +1,25 @@
+# JESA Digital Twin — Grafana Alert Contact Points
+# Reference: docs/nodered-migration.md §5.1
+#
+# Replace the webhook URL with your Teams/Slack incoming webhook.
+# For email: configure GF_SMTP_* environment variables in docker-compose.yml
+# and add a second receiver of type email below.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: jesa-ops
+    receivers:
+      - uid: webhook-teams
+        type: webhook
+        settings:
+          url: https://hooks.example.com/jesa-alerts
+          httpMethod: POST
+          title: "JESA Digital Twin — {{ .CommonLabels.alertname }}"
+          message: |
+            🚨 **{{ .CommonLabels.alertname }}** — severity: {{ .CommonLabels.severity }}
+            Asset: {{ .CommonLabels.asset }}
+            Value: {{ .CommonAnnotations.value }}
+            Time: {{ .StartsAt }}
+        disableResolveMessage: false

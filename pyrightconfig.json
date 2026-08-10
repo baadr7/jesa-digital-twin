@@ -1,0 +1,29 @@
+{
+    "include": [
+        "sim",
+        "uns",
+        "tests",
+        "web-3d"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "**/node_modules",
+        "**/.*",
+        "**/*.egg-info",
+        ".venv",
+        "notebooks",
+        "infra",
+        ".github",
+        "dist",
+        "build"
+    ],
+    "venvPath": ".",
+    "venv": ".venv",
+    "pythonVersion": "3.11",
+    "pythonPlatform": "Windows",
+    "typeCheckingMode": "basic",
+    "reportMissingImports": "none",
+    "reportMissingModuleSource": "none",
+    "reportShadowedImports": "none",
+    "stubPath": ""
+}

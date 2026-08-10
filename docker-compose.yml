@@ -1,25 +1,25 @@
-# JESA Digital Twin — Infrastructure Stack
-# Reference: docs/uns-spec.md
+# JESA Digital Twin — Full Infrastructure Stack
+#
+# All services in one docker-compose.
+# OPC UA simulators (A1/A2/A3/PLC) run on the HOST via launch_all.ps1
+# and are reached by Node-RED via host.docker.internal:4840-4843.
 #
 # Usage:
-#   docker compose up -d              # start all services
-#   docker compose logs -f mosquitto  # follow broker logs
-#   docker compose down -v            # stop and remove volumes
-#
-# The Python gateway (uns/) and simulators (sim/) run on the host,
-# connecting to Mosquitto at localhost:1883 and OPC UA servers at
-# localhost:4840-4843.
+#   docker compose build nodered        # rebuild Node-RED image
+#   docker compose up -d                # start everything
+#   docker compose logs -f nodered      # follow Node-RED logs
+#   docker compose down                 # stop all containers
 
 services:
 
-  # -- MQTT Broker --
+  # ── MQTT Broker ─────────────────────────────────────────────────────────
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: jesa-mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "1883:1883"    # MQTT
+      - "9001:9001"    # WebSocket (Paho.JS browser viewer)
     volumes:
       - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
@@ -31,7 +31,39 @@ services:
       retries: 3
       start_period: 5s
 
-  # -- Time-Series Database --
+  # ── Node-RED UNS Gateway ─────────────────────────────────────────────────
+  # Tabs: OPC UA Gateway · Derived Data · Alarm Engine · Monitor Dashboard
+  # Connects to OPC UA sims on host via host.docker.internal:4840–4843.
+  # NOTE: --jitless disables V8 JIT to work around WSL2 kernel TurboFan crash.
+  nodered:
+    build:
+      context: .
+      dockerfile: Dockerfile.nodered
+    image: jesa-nodered:latest
+    container_name: jesa-nodered
+    restart: unless-stopped
+    ports:
+      - "1880:1880"    # Node-RED editor + /ui dashboard
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: Africa/Casablanca
+    volumes:
+      - ./infra/nodered/flows.json:/data/flows.json
+      - ./infra/nodered/settings.js:/data/settings.js:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:1880/settings || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+
+
+  # ── Time-Series Database ─────────────────────────────────────────────────
   influxdb:
     image: influxdb:2
     container_name: jesa-influxdb
@@ -56,7 +88,7 @@ services:
       retries: 5
       start_period: 15s
 
-  # -- Telegraf Agent (MQTT -> InfluxDB) --
+  # ── Telegraf: MQTT → InfluxDB ────────────────────────────────────────────
   telegraf:
     image: telegraf:1.34
     container_name: jesa-telegraf
@@ -71,14 +103,14 @@ services:
     volumes:
       - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
 
-  # -- ML Inference Service --
-  # uns/ is NOT volume-mounted: mounting Windows folders into WSL2 Linux
-  # containers corrupts .pyc bytecode (bad marshal data). Code is COPY'd
-  # into the image at build time instead.
+  # ── ML Inference Service ─────────────────────────────────────────────────
+  # Subscribes to MQTT topics published by Node-RED.
+  # Code is COPY'd into the image (not volume-mounted) to avoid WSL2 .pyc corruption.
   ml-inference:
     build:
       context: .
       dockerfile: Dockerfile.ml
+    image: jesa-ml-inference:latest
     container_name: jesa-ml-inference
     restart: unless-stopped
     depends_on:
@@ -98,7 +130,7 @@ services:
     volumes:
       - ./notebooks/models:/app/notebooks/models
 
-  # -- Grafana (Visualization) --
+  # ── Grafana ──────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.1.5
     container_name: jesa-grafana

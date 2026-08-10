@@ -1,0 +1,30 @@
+# JESA Digital Twin — Node-RED Gateway
+#
+# Base: nodered/node-red:4.0.9-18 (Node.js 18 LTS, Alpine)
+#
+# flows.json + settings.js are bind-mounted at runtime.
+
+FROM nodered/node-red:4.0.9-18
+
+USER root
+RUN apk add --no-cache python3 make g++ linux-headers
+USER node-red
+
+COPY infra/nodered/package.json /data/package.json
+
+# Install required nodes including hexy@0.3.4 (CJS version needed by node-opcua-debug)
+RUN cd /data \
+    && npm install --save --ignore-scripts \
+        hexy@0.3.4 \
+        node-red-contrib-opcua@0.2.354 \
+        node-red-dashboard@3.6.5 \
+        node-red-node-ui-table@0.4.5 \
+        --no-audit --no-fund
+
+# Purge any nested ESM hexy packages so node-opcua uses top-level hexy@0.3.4
+RUN cd /data \
+    && find node_modules -mindepth 2 -name hexy -exec rm -rf {} + 2>/dev/null || true \
+    && npm rebuild \
+    && npm cache clean --force
+
+LABEL jesa.version="1.0" jesa.node-red="4.0.9" jesa.node="18"

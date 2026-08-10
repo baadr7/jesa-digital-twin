@@ -21,10 +21,12 @@ import argparse
 import asyncio
 import logging
 import math
+import os
 import time
 from typing import Any
 
-from asyncua import Client, Server
+from asyncua.client.client import Client
+from asyncua.server.server import Server
 
 from sim import config
 from sim.common import Tag
@@ -155,6 +157,14 @@ class PlcRuntime:
         self._casts = {tag.key: tag.cast for tag in OUTPUTS}
         self._prev_alarms: dict[str, bool] = {}
         self._scan_count = 0
+        # ISA-18.2 on-delay: alarm must be True for N consecutive scans before raising.
+        # Hysteresis: alarm must be False for N consecutive scans before clearing.
+        # This prevents chattering on signals sitting on threshold boundaries.
+        self._alarm_pending:   dict[str, int] = {}   # rising  edge counter
+        self._alarm_clearing:  dict[str, int] = {}   # falling edge counter
+        self._alarm_state:     dict[str, bool] = {}  # confirmed alarm state
+        self.ON_DELAY_SCANS   = 2    # scans of True  before alarm confirmed
+        self.CLEAR_DELAY_SCANS = 2   # scans of False before alarm cleared
 
     # ---------------------------------------------------------------- server
 
@@ -163,6 +173,7 @@ class PlcRuntime:
         await server.init()
         server.set_endpoint(f"opc.tcp://0.0.0.0:{self.port}/jesa/plc")
         server.set_server_name("JESA PLC")
+        self._patch_endpoint_discovery(server)
         idx = await server.register_namespace("urn:jesa:plc")
         plc_obj = await server.nodes.objects.add_object(idx, "PLC")
         folders: dict[str, Any] = {}
@@ -241,6 +252,40 @@ class PlcRuntime:
         out["System/ActiveAlarms"] = sum(1 for key in ALARM_KEYS if out[key])
         return out
 
+    def _apply_hysteresis(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Apply on-delay confirmation and hysteresis to all alarm outputs.
+
+        Rules per alarm key:
+        - RAISE:  raw value True for ON_DELAY_SCANS consecutive scans
+        - CLEAR:  raw value False for CLEAR_DELAY_SCANS consecutive scans
+        Non-alarm keys pass through unchanged.
+        """
+        out = dict(raw)
+        for key in ALARM_KEYS:
+            raw_val = bool(raw.get(key, False))
+            current_state = self._alarm_state.get(key, False)
+
+            if raw_val:
+                # Rising: increment pending, reset clearing counter
+                self._alarm_pending[key]  = self._alarm_pending.get(key, 0) + 1
+                self._alarm_clearing[key] = 0
+                if self._alarm_pending[key] >= self.ON_DELAY_SCANS:
+                    self._alarm_state[key] = True
+            else:
+                # Falling: increment clearing counter, reset pending
+                self._alarm_clearing[key] = self._alarm_clearing.get(key, 0) + 1
+                self._alarm_pending[key]  = 0
+                if self._alarm_clearing[key] >= self.CLEAR_DELAY_SCANS:
+                    self._alarm_state[key] = False
+
+            out[key] = self._alarm_state.get(key, False)
+
+        # Recompute ActiveAlarms from confirmed states
+        out["System/ActiveAlarms"] = sum(
+            1 for k in ALARM_KEYS if self._alarm_state.get(k, False)
+        )
+        return out
+
     def _log_alarm_edges(self, out: dict[str, Any]) -> None:
         for key in sorted(ALARM_KEYS):
             now, before = bool(out[key]), self._prev_alarms.get(key, False)
@@ -250,6 +295,41 @@ class PlcRuntime:
 
     # ------------------------------------------------------------------ run
 
+    @staticmethod
+    def _patch_endpoint_discovery(server: Server) -> None:
+        advertise = os.environ.get("JESA_OPCUA_ADVERTISE_HOST", "host.docker.internal")
+        if "0.0.0.0" not in (server.endpoint.netloc if hasattr(server.endpoint, "netloc") else ""):
+            return
+        _orig = server.get_endpoints
+
+        async def _patched(*args, **kwargs):
+            eps = await _orig(*args, **kwargs)
+            for ep in eps:
+                url = getattr(ep, "EndpointUrl", None)
+                if url and "0.0.0.0" in url:
+                    ep.EndpointUrl = url.replace("0.0.0.0", advertise)
+            return eps
+
+        server.get_endpoints = _patched
+
+    async def _endpoint_advertise_task(self, server: Server) -> None:
+        advertise = os.environ.get("JESA_OPCUA_ADVERTISE_HOST", "host.docker.internal")
+        try:
+            if hasattr(server, "set_match_discovery_endpoint_url"):
+                server.set_match_discovery_endpoint_url(False)
+        except Exception:
+            pass
+        while True:
+            try:
+                eps = await server.get_endpoints()
+                for e in eps:
+                    url = getattr(e, "EndpointUrl", None)
+                    if url and "0.0.0.0" in url:
+                        e.EndpointUrl = url.replace("0.0.0.0", advertise)
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
     async def run(self) -> None:
         server = await self._build_server()
         pollers = [asyncio.create_task(inp.run()) for inp in self.inputs.values()]
@@ -257,26 +337,31 @@ class PlcRuntime:
                  self.port, self.scan_period * 1000)
         try:
             async with server:
-                loop = asyncio.get_running_loop()
-                deadline = loop.time()
-                while True:
-                    t0 = time.perf_counter()
-                    out = self._logic()
-                    self._scan_count += 1
-                    out["System/ScanCount"] = self._scan_count
-                    out["System/ScanTimeMs"] = (time.perf_counter() - t0) * 1000.0
-                    self._log_alarm_edges(out)
-                    await asyncio.gather(*(
-                        self._nodes[key].write_value(self._casts[key](value))
-                        for key, value in out.items()
-                    ))
-                    deadline += self.scan_period
-                    delay = deadline - loop.time()
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-                    else:
-                        deadline = loop.time()
-                        await asyncio.sleep(0)
+                adv_task = asyncio.create_task(self._endpoint_advertise_task(server))
+                try:
+                    loop = asyncio.get_running_loop()
+                    deadline = loop.time()
+                    while True:
+                        t0 = time.perf_counter()
+                        raw_out = self._logic()
+                        self._scan_count += 1
+                        out = self._apply_hysteresis(raw_out)
+                        out["System/ScanCount"] = self._scan_count
+                        out["System/ScanTimeMs"] = (time.perf_counter() - t0) * 1000.0
+                        self._log_alarm_edges(out)
+                        await asyncio.gather(*(
+                            self._nodes[key].write_value(self._casts[key](value))
+                            for key, value in out.items()
+                        ))
+                        deadline += self.scan_period
+                        delay = deadline - loop.time()
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        else:
+                            deadline = loop.time()
+                            await asyncio.sleep(0)
+                finally:
+                    adv_task.cancel()
         finally:
             for task in pollers:
                 task.cancel()

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JESA Digital Twin - Fleet Overview</title>
     <meta name="description" content="JESA Industry 4.0 Digital Twin — Real-time predictive maintenance and anomaly detection dashboard">
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=10">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
@@ -110,6 +110,10 @@
                     <span class="kpi-mini-value" id="assets-online">3/3</span>
                 </div>
                 <div class="kpi-mini">
+                    <span class="kpi-mini-label">Active Alarms</span>
+                    <span class="kpi-mini-value" id="global-alarms-count" style="color:var(--accent-green)">0</span>
+                </div>
+                <div class="kpi-mini">
                     <span class="kpi-mini-label">Messages</span>
                     <span class="kpi-mini-value" id="msg-count">0</span>
                 </div>
@@ -154,6 +158,17 @@
                     <div class="progress-bar-track">
                         <div class="progress-bar-fill a1-bar" id="a1-bar" style="width:0%"></div>
                     </div>
+                    <!-- Derived data from Node-RED Tab 02 -->
+                    <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">Power (derived)</span>
+                            <span class="gauge-value mono" id="a1-power" style="font-size:11px">—</span>
+                        </div>
+                        <div class="gauge-block">
+                            <span class="gauge-label">Alarms</span>
+                            <span class="gauge-value mono" id="a1-alarms" style="font-size:13px;color:var(--accent-green)">0</span>
+                        </div>
+                    </div>
                     <div class="update-meta">Last update <span id="a1-last">Waiting for data</span></div>
                 </div>
             </div>
@@ -183,6 +198,17 @@
                     </div>
                     <div class="progress-bar-track">
                         <div class="progress-bar-fill a2-bar" id="a2-bar" style="width:0%"></div>
+                    </div>
+                    <!-- Derived data from Node-RED Tab 02 -->
+                    <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">Cooler ΔT (derived)</span>
+                            <span class="gauge-value mono" id="a2-dt" style="font-size:11px">—</span>
+                        </div>
+                        <div class="gauge-block">
+                            <span class="gauge-label">Alarms</span>
+                            <span class="gauge-value mono" id="a2-alarms" style="font-size:13px;color:var(--accent-green)">0</span>
+                        </div>
                     </div>
                     <div class="update-meta">Last update <span id="a2-last">Waiting for data</span></div>
                 </div>
@@ -214,6 +240,27 @@
                     <div class="progress-bar-track">
                         <div class="progress-bar-fill a3-bar" id="a3-bar" style="width:0%"></div>
                     </div>
+                    <!-- Derived data from Node-RED Tab 02 -->
+                    <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">COMP duty 5min</span>
+                            <span class="gauge-value mono" id="a3-comp-duty" style="font-size:11px">—</span>
+                        </div>
+                        <div class="gauge-block">
+                            <span class="gauge-label">Load state</span>
+                            <span class="gauge-value mono" id="a3-load-state" style="font-size:11px">—</span>
+                        </div>
+                    </div>
+                    <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">Alarms</span>
+                            <span class="gauge-value mono" id="a3-alarms" style="font-size:13px;color:var(--accent-green)">0</span>
+                        </div>
+                        <div class="gauge-block">
+                            <span class="gauge-label">Dataset Time</span>
+                            <span class="gauge-value mono" id="a3-dataset-ts" style="font-size:11px">—</span>
+                        </div>
+                    </div>
                     <div class="update-meta">Last update <span id="a3-last">Waiting for data</span></div>
                 </div>
             </div>
@@ -232,6 +279,6 @@
         <div id="detail-content"></div>
     </div>
 
-    <script type="module" src="app.js?v=8"></script>
+    <script type="module" src="app.js?v=19"></script>
 </body>
 </html>

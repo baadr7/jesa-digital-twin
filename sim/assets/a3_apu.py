@@ -11,6 +11,7 @@ anomalies with the documented air-leak failures.
 
 from __future__ import annotations
 
+import os
 from typing import Any, AsyncIterator
 
 import pandas as pd
@@ -84,14 +85,10 @@ class A3ApuSimulator(AssetSimulator):
                     values["Simulation/RowIndex"] = chunk.index[pos]
                     values["Simulation/SourceTimestamp"] = ts.isoformat()
 
-                    # --- OVERRIDE DÉMO JESA ---
-                    # Le dataset MetroPT-3 contient des phases où
-                    # LPS=1 (Low Pressure Switch < 7 bar) et Oil_level=1
-                    # (niveau huile bas) sur de longues périodes. Pour la
-                    # démonstration on force ces drapeaux à 0 (nominal) afin
-                    # qu'A3 n'apparaisse pas en warning permanent sur le
-                    # dashboard simulator et dans le PLC.
-                    values["Digital/LPS"]       = 0
-                    values["Digital/OilLevel"]  = 0
+                    # Pass --demo-stable to suppress LPS/OilLevel warning flags
+                    # during live presentations (normally let dataset values flow).
+                    if os.environ.get("JESA_DEMO_STABLE"):
+                        values["Digital/LPS"]      = 0
+                        values["Digital/OilLevel"] = 0
 
                     yield values, dt

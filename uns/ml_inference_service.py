@@ -328,25 +328,18 @@ class A2Predictor:
         if raw_cooler < 100:
             self.degraded_cooler_count += 1
 
-        # --- NORMALISATION SANTÉ DÉMO ---
-        # Le dataset ZeMA et le modèle publient des CLASSES BRUTES
-        # (cooler: 100/20/3/0, valve: 100/90/80/73, pump: 0/1/2, accum: 130/115/100/90).
-        # Pour la démonstration JESA on force systématiquement l'état OPTIMAL
-        # (100 / 130 / 0) dans les topics MQTT analytics afin qu'A2 n'apparaisse
-        # JAMAIS en panne permanente dans le Live Twin. La dégradation réelle
-        # est toujours disponible via raw_* (logs, future UI admin).
-        #
-        # Mapping classe brute → santé % publiée :
-        #   cooler      : {100, 20, 3, 0}          → 100 (optimal)
-        #   valve       : {100, 90, 80, 73}        → 100 (optimal)
-        #   pump_leak   : {0, 1, 2}                → 0   (no leak)
-        #   accumulator : {130, 115, 100, 90}      → 130 (optimal)
-        cooler_pred = 100
-        valve_pred  = 100
-        pump_pred   = 0
-        accum_pred  = 130
+        # Publish real ML predictions so the dashboard reflects the
+        # actual dataset condition classes. The ZeMA dataset is mostly
+        # healthy (CoolerCondition=100 for ~92% of cycles), so the
+        # live twin shows healthy most of the time and degraded
+        # classes when the dataset cycles through them — correct
+        # behaviour for a predictive-maintenance demonstration.
+        cooler_pred = raw_cooler
+        valve_pred  = raw_valve
+        pump_pred   = raw_pump
+        accum_pred  = raw_accum
 
-        log.debug("A2 raw classes cooler=%d valve=%d pump=%d accum=%d → forced healthy",
+        log.debug("A2 classes cooler=%d valve=%d pump=%d accum=%d",
                   raw_cooler, raw_valve, raw_pump, raw_accum)
 
         return {
@@ -642,6 +635,7 @@ def on_message(client, userdata, msg):
                 json.dumps({
                     "ts": ts, "v": res["is_anomaly"], "q": "good",
                     "score": res["anomaly_score"],
+                    "threshold": userdata["a3"].threshold,
                 }),
                 qos=0,
             )

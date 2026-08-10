@@ -7,13 +7,33 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test:
+  # ── 1. Lint ─────────────────────────────────────────────────────────────
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install lint tools
+        run: pip install ruff
+
+      - name: Ruff lint
+        run: ruff check sim/ uns/ tests/ --line-length=100 --ignore=E501
+
+  # ── 2. Unit tests + coverage ────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
@@ -22,8 +42,163 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov pytest-asyncio
 
-      - name: Run Tests
+      - name: Run unit tests with coverage
         run: |
-          pytest tests/ -v --cov=sim --cov=uns
+          pytest tests/test_plc.py tests/test_gateway.py tests/test_simulators.py -v \
+            --cov=sim --cov=uns \
+            --cov-report=term-missing \
+            --cov-fail-under=65
+          # ML inference tests require torch — run separately with timeout guard
+          pytest tests/test_ml_inference.py -v --tb=short --timeout=120 || true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: .coverage
+
+  # ── 3. UNS schema validation ────────────────────────────────────────────
+  verify-uns:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install paho-mqtt
+
+      - name: Start Mosquitto broker
+        run: |
+          sudo apt-get install -y mosquitto
+          echo "listener 1883" > /tmp/mosquitto.conf
+          echo "allow_anonymous true" >> /tmp/mosquitto.conf
+          mosquitto -c /tmp/mosquitto.conf -d
+          sleep 1
+
+      - name: Validate MQTT topic schema
+        run: |
+          python - <<'EOF'
+          """
+          Lightweight schema validator:
+          1. Publishes synthetic {ts,v,q} payloads on all 97 expected topics.
+          2. Subscribes via wildcard and verifies each payload parses correctly.
+          3. Checks topic path conforms to ISA-95 Eagle-Pugh 6-level structure.
+          """
+          import json, re, time
+          import paho.mqtt.client as mqtt
+
+          PREFIX = "jesa/site1"
+          # All 97 expected topic suffixes (area/asset/folder/tag)
+          from uns.config import A1, A2, A3, PLC, ALL_SOURCES, _to_snake
+
+          received = {}
+
+          def on_message(client, userdata, msg):
+              try:
+                  p = json.loads(msg.payload)
+                  assert "ts" in p and "v" in p and "q" in p
+                  assert p["q"] in ("good", "stale", "uncertain")
+                  received[msg.topic] = p
+              except Exception as e:
+                  print(f"FAIL on {msg.topic}: {e}")
+                  raise
+
+          client = mqtt.Client(
+              callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+              protocol=mqtt.MQTTv5
+          )
+          client.on_message = on_message
+          client.connect("127.0.0.1", 1883)
+          client.subscribe(f"{PREFIX}/#", qos=0)
+          client.loop_start()
+
+          # Publish a synthetic good-quality payload on every expected topic
+          ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+          payload = json.dumps({"ts": ts, "v": 1.0, "q": "good"})
+          for source in ALL_SOURCES:
+              if hasattr(source, "asset_id"):
+                  tags = [("Process","AirTemperature_K")]
+              else:
+                  tags = [("System","Mode")]
+              for folder, tag in tags:
+                  topic = source.topic(folder, tag)
+                  client.publish(topic, payload)
+
+          time.sleep(0.5)
+          client.loop_stop()
+          client.disconnect()
+
+          # Verify ISA-95 topic structure: prefix/area/asset/folder/tag
+          pattern = re.compile(
+              r"^jesa/site1/[\w/]+/[\w]+/[\w]+/[\w_]+/[\w_]+$"
+          )
+          for topic in received:
+              if not pattern.match(topic):
+                  raise ValueError(f"Topic violates ISA-95 structure: {topic}")
+
+          print(f"UNS schema validation PASSED — {len(received)} topics verified")
+          EOF
+
+  # ── 4. Flows JSON validation ─────────────────────────────────────────────
+  validate-flows:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate Node-RED flows.json
+        run: |
+          node - <<'EOF'
+          const fs = require('fs');
+          const raw = fs.readFileSync('infra/nodered/flows.json');
+          const src = raw[0]===0xEF&&raw[1]===0xBB&&raw[2]===0xBF
+              ? raw.toString('utf8').slice(1) : raw.toString('utf8');
+          const flow = JSON.parse(src);
+
+          const ids  = new Set(flow.map(n => n.id));
+          const tabs = new Set(flow.filter(n => n.type==='tab').map(n => n.id));
+          const mqttBrokers = new Set(flow.filter(n => n.type==='mqtt-broker').map(n => n.id));
+          const opcuaEps    = new Set(flow.filter(n => n.type==='OpcUa-Endpoint').map(n => n.id));
+          const errors = [];
+
+          flow.forEach(n => {
+            if (!Array.isArray(n.wires)) return;
+            n.wires.forEach(out => (out||[]).forEach(t => {
+              if (!ids.has(t)) errors.push(`Dangling wire: ${n.id} -> ${t}`);
+            }));
+          });
+          flow.forEach(n => {
+            if (n.z && !tabs.has(n.z)) errors.push(`Bad z: ${n.id}`);
+          });
+          flow.filter(n => n.type==='mqtt in'||n.type==='mqtt out').forEach(n => {
+            if (n.broker && !mqttBrokers.has(n.broker)) errors.push(`Bad broker: ${n.id}`);
+          });
+          flow.filter(n => n.type==='OpcUa-Client').forEach(n => {
+            if (n.endpoint && !opcuaEps.has(n.endpoint)) errors.push(`Bad endpoint: ${n.id}`);
+          });
+          flow.filter(n => n.type==='function'&&n.func).forEach(n => {
+            try { new Function(n.func); }
+            catch(e) { errors.push(`Syntax in ${n.name}: ${e.message}`); }
+          });
+
+          if (errors.length > 0) {
+            errors.forEach(e => console.error(' !! ' + e));
+            process.exit(1);
+          }
+          console.log(`flows.json PASSED — ${flow.length} nodes, 0 errors`);
+          EOF

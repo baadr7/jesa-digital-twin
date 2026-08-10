@@ -50,3 +50,7 @@ debug-twin-ui-server-check.md
 
 # Docker
 .dockerignore
+
+# Node-RED runtime & Docker node_modules
+nodered-runtime/
+infra/nodered/node_modules/

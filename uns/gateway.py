@@ -31,7 +31,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import paho.mqtt.client as mqtt
-from asyncua import Client, ua
+from asyncua.client.client import Client
+from asyncua import ua
 
 from uns import config
 
@@ -120,6 +121,7 @@ class OpcuaPoller:
         self.publisher = publisher
         self.poll_interval = poll_interval
         self._last_ok = 0.0
+        self._last_ok_wall: float = 0.0   # wall-clock time of last successful read
         self._tag_count = 0
         self._last_tag_nodes: list[tuple[str, str, Any]] = []  # retained for stale publish
 
@@ -162,7 +164,23 @@ class OpcuaPoller:
                             *(node.read_value() for _, _, node in tag_nodes)
                         )
                         self._last_ok = time.monotonic()
-                        quality = "good"
+                        self._last_ok_wall = time.monotonic()
+
+                        # Use STALE_TIMEOUT_S: mark quality stale when more
+                        # than STALE_TIMEOUT_S seconds have elapsed since the
+                        # last successful poll (e.g. server hiccup between
+                        # cycles). age_since_last measures inter-cycle latency,
+                        # not the poll duration itself.
+                        age_since_last = (
+                            time.monotonic() - self._last_ok_wall
+                            if self._last_ok_wall > 0 else 0.0
+                        )
+                        quality = (
+                            "stale"
+                            if self._last_ok_wall > 0
+                            and age_since_last > config.STALE_TIMEOUT_S
+                            else "good"
+                        )
 
                         for (folder, name, _), value in zip(tag_nodes, values):
                             topic = self.source.topic(folder, name)

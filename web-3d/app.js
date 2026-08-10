@@ -1328,6 +1328,8 @@ const _a3 = {
 
 // A2 : tracker le dernier message analytics pour STALE guard
 let _a2LastAnalyticsTs = 0;
+// A2 : initialized flag — don't show condition values until sim loop has advanced past second 0
+let _a2SimStarted = false;
 
 // A1 : previous state to detect transitions (avoid log spam)
 let _a1PrevState = '';   // '' | 'healthy' | 'warning' | 'critical'
@@ -1745,24 +1747,65 @@ function _dsbA1Status(L) {
     return { chips, tiles };
 }
 function _dsbA2Status(L) {
-    const grade = (value, map) => map[value] || ['warning', '!'];
+    // Show dashes when sim hasn't started yet (all class values still at OPC UA init default 0)
+    const ready = _a2SimStarted;
+
+    const grade = (value, map) => {
+        if (!ready || value == null) return ['warning', '—'];
+        return map[value] || ['warning', '!'];
+    };
+
     const cooler = grade(L['Condition/CoolerCondition_pct'],
-        { 100: ['good', '✓'], 20: ['serious', '▲'], 3: ['critical', '✕'] });
-    const valve = grade(L['Condition/ValveCondition_pct'],
+        { 100: ['good', '✓'], 20: ['serious', '▲'], 3: ['critical', '✕'], 0: ['critical', '✕'] });
+    const valve  = grade(L['Condition/ValveCondition_pct'],
         { 100: ['good', '✓'], 90: ['warning', '!'], 80: ['serious', '▲'], 73: ['critical', '✕'] });
-    const pump = grade(L['Condition/PumpLeakage'],
+    const pump   = grade(L['Condition/PumpLeakage'],
         { 0: ['good', '✓'], 1: ['warning', '!'], 2: ['critical', '✕'] });
-    const accu = grade(L['Condition/AccumulatorPressure_bar'],
+    const accu   = grade(L['Condition/AccumulatorPressure_bar'],
         { 130: ['good', '✓'], 115: ['warning', '!'], 100: ['serious', '▲'], 90: ['critical', '✕'] });
+
+    // Cooler label: class integer → human text
+    const coolerTxt = ready ? (() => {
+        const m = { 100: 'Optimal', 20: 'Partial', 3: 'Near-Failure', 0: 'Failed' };
+        const c = L['Condition/CoolerCondition_pct'];
+        return m[c] != null ? `Cooler: ${m[c]}` : `Cooler class ${c}`;
+    })() : 'Cooler —';
+
+    // Valve label
+    const valveTxt = ready ? (() => {
+        const m = { 100: 'Optimal', 90: 'Small lag', 80: 'Severe lag', 73: 'Near-failure' };
+        const c = L['Condition/ValveCondition_pct'];
+        return m[c] != null ? `Valve: ${m[c]}` : `Valve class ${c}`;
+    })() : 'Valve —';
+
+    const pumpVal = L['Condition/PumpLeakage'];
+    const pumpTxt = !ready ? 'Pump —'
+                  : pumpVal === 0 ? 'Pump: No leak'
+                  : pumpVal === 1 ? 'Pump: Weak leak'
+                  : pumpVal === 2 ? 'Pump: Severe leak'
+                  : `Pump class ${pumpVal}`;
+
+    const accuVal = L['Condition/AccumulatorPressure_bar'];
+    const accuTxt = !ready ? 'Accum. —'
+                  : accuVal === 130 ? 'Accum.: Optimal'
+                  : accuVal === 115 ? 'Accum.: Slightly reduced'
+                  : accuVal === 100 ? 'Accum.: Severely reduced'
+                  : accuVal === 90  ? 'Accum.: Near-failure'
+                  : `Accum. ${accuVal} bar`;
+
     const chips =
-        _dsbChip(cooler[0], cooler[1], `Cooler ${L['Condition/CoolerCondition_pct'] ?? '-'}%`) +
-        _dsbChip(valve[0],  valve[1],  `Valve ${L['Condition/ValveCondition_pct'] ?? '-'}%`) +
-        _dsbChip(pump[0],   pump[1],   `Pump leak ${L['Condition/PumpLeakage'] ?? '-'}`) +
-        _dsbChip(accu[0],   accu[1],   `Accumulator ${L['Condition/AccumulatorPressure_bar'] ?? '-'} bar`) +
+        _dsbChip(cooler[0], cooler[1], coolerTxt) +
+        _dsbChip(valve[0],  valve[1],  valveTxt)  +
+        _dsbChip(pump[0],   pump[1],   pumpTxt)   +
+        _dsbChip(accu[0],   accu[1],   accuTxt)   +
         _dsbToggleChip(!L['Condition/StableFlag'], 'Stable');
+
+    const cycleIdx = L['Simulation/CycleIndex'];
+    const cycleSec = L['Simulation/CycleSecond'];
     const tiles =
-        _dsbTile('Cycle',        L['Simulation/CycleIndex']  ?? '-', '/ 2205') +
-        _dsbTile('Cycle second', L['Simulation/CycleSecond'] ?? '-', 's');
+        _dsbTile('Cycle',        cycleIdx != null ? cycleIdx : '—', '/ 2205') +
+        _dsbTile('Cycle second', cycleSec != null ? cycleSec : '—', 's');
+
     return { chips, tiles };
 }
 function _dsbA3Status(L) {
@@ -2384,6 +2427,8 @@ function onMessageArrived(message) {
         if (topic.includes('/A2/simulation/cycle_index')) {
             const el = document.getElementById('a2-cycle-index');
             if (el) el.textContent = Number(v) + ' / 2205';
+            // Also mark started if cycle has advanced past 0
+            if (Number(v) > 0) _a2SimStarted = true;
         }
         if (topic.includes('/A2/simulation/cycle_second')) {
             const sec = Number(v);
@@ -2392,6 +2437,8 @@ function onMessageArrived(message) {
             // Drive the cycle progress bar (0–59 → 0–100%)
             const bar = document.getElementById('a2-cycle-bar');
             if (bar) bar.style.width = Math.round((sec / 59) * 100) + '%';
+            // Mark sim as started once second has advanced past 0
+            if (sec > 0 || _a2SimStarted) _a2SimStarted = true;
         }
         if (topic.includes('/A3/simulation/source_timestamp') && v) {
             const el = document.getElementById('a3-dataset-ts');
@@ -2462,10 +2509,11 @@ function onMessageArrived(message) {
         //   accum.: 130=optimal, 115=slightly reduced, 100=severely reduced, 90=close to failure
         else if (topic.includes('/A2/analytics/cooler_condition') ||
                  topic.includes('/A2/condition/cooler_condition_pct')) {
-            // Guard: skip null, stale, or OPC UA default-zero (uninitialized)
+            // Guard: skip null, stale, or uninitialized OPC UA default values
             if (v === null || v === undefined || payload.q === 'stale') return;
-            if (v === 0 && topic.includes('/A2/condition/')) return;
-
+            // Block condition/ OPC UA topics until sim loop has advanced (cycle_second > 0)
+            // The OPC UA Tag default is 0 — shown as "Failed" before real data arrives
+            if (topic.includes('/A2/condition/') && (!_a2SimStarted || v === 0)) return;
             if (topic.includes('/A2/analytics/')) _a2LastAnalyticsTs = Date.now();
 
             const coolerMap = {
@@ -2496,7 +2544,9 @@ function onMessageArrived(message) {
         else if (topic.includes('/A2/analytics/valve_condition') ||
                  topic.includes('/A2/condition/valve_condition_pct')) {
             // Class 0 never valid for valve (valid: 100, 90, 80, 73)
+            // Also block condition/ until sim loop has started
             if (v === null || v === undefined || payload.q === 'stale' || v === 0) return;
+            if (topic.includes('/A2/condition/') && !_a2SimStarted) return;
 
             const valveMap = {
                 100: { pct: 100, txt: 'Optimal',      cls: 'healthy'  },
@@ -2523,6 +2573,7 @@ function onMessageArrived(message) {
         else if (topic.includes('/A2/analytics/pump_leakage') ||
                  topic.includes('/A2/condition/pump_leakage')) {
             if (v === null || v === undefined || payload.q === 'stale') return;
+            if (topic.includes('/A2/condition/') && !_a2SimStarted) return;
             const pumpMap = {
                 0: { txt: 'No leak',     cls: 'healthy'  },
                 1: { txt: 'Weak leak',   cls: 'warning'  },
@@ -2537,6 +2588,7 @@ function onMessageArrived(message) {
         else if (topic.includes('/A2/analytics/accumulator_pressure') ||
                  topic.includes('/A2/condition/accumulator_pressure_bar')) {
             if (v === null || v === undefined || payload.q === 'stale') return;
+            if (topic.includes('/A2/condition/') && !_a2SimStarted) return;
             const accMap = {
                 130: { txt: 'Optimal',           cls: 'healthy'  },
                 115: { txt: 'Slightly reduced',  cls: 'warning'  },

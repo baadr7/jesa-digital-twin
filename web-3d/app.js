@@ -56,7 +56,15 @@ function _uptimeStr() {
 
 // Called every second to refresh dynamic elements on overview
 function _refreshOverviewDynamic() {
-    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    const set = (id, v) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.textContent === String(v)) return;
+        el.textContent = v;
+        el.classList.remove('val-flash');
+        void el.offsetWidth;
+        el.classList.add('val-flash');
+    };
 
     // KPI strip
     const alerts = _countAlerts();
@@ -566,7 +574,16 @@ function _vizRefreshCharts() {
     const a2vLatest = vizData.A2.valve.at(-1)          ?? null;
     const a3Latest  = vizData.A3.anomalyScore.at(-1)   ?? null;
 
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    const set = (id, val) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.textContent === String(val)) return;   // no change → no redraw
+        el.textContent = val;
+        el.classList.remove('val-flash');
+        // force reflow so the animation restarts
+        void el.offsetWidth;
+        el.classList.add('val-flash');
+    };
 
     // KPI strip (top)
     // A2: if ring buffer has a value show %, otherwise fall back to the text label
@@ -625,7 +642,7 @@ function renderVisualisationPage() {
                             <span class="chart-dot a1"></span>
                             A1 — CNC Failure Probability
                         </div>
-                        <span class="chart-card-badge">Supervised</span>
+                        <span class="chart-card-badge">~10 s / part</span>
                     </div>
                     <div class="chart-canvas-wrap">
                         <canvas id="viz-chart-a1"></canvas>
@@ -648,7 +665,7 @@ function renderVisualisationPage() {
                             <span class="chart-dot a3"></span>
                             A3 — APU Anomaly Score
                         </div>
-                        <span class="chart-card-badge">Unsupervised</span>
+                        <span class="chart-card-badge">60× · pred/10 s</span>
                     </div>
                     <div class="chart-canvas-wrap">
                         <canvas id="viz-chart-a3"></canvas>
@@ -674,7 +691,7 @@ function renderVisualisationPage() {
                             <span class="chart-dot a2"></span>
                             A2 — Hydraulic System Condition
                         </div>
-                        <span class="chart-card-badge">Multi-target</span>
+                        <span class="chart-card-badge">1 Hz · pred/60 s</span>
                     </div>
                     <div class="chart-canvas-wrap" style="height:200px">
                         <canvas id="viz-chart-a2"></canvas>
@@ -725,7 +742,15 @@ function renderVisualisationPage() {
 //  ANALYTICS — Live refresh helper
 // =====================================================================
 function _refreshAnalyticsDynamic() {
-    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.textContent === String(val)) return;
+        el.textContent = val;
+        el.classList.remove('val-flash');
+        void el.offsetWidth;
+        el.classList.add('val-flash');
+    };
     const setStyle = (id, prop, val) => { const el = document.getElementById(id); if (el) el.style[prop] = val; };
 
     // KPI numeric values from ring buffers
@@ -1381,6 +1406,9 @@ const _dsbUnsToKey = {
 const DSB_LAYOUT = {
     A1: {
         title: 'A1 — CNC Milling Machine',
+        // Event-driven: one sample per machined part, published every ~10 s real-time.
+        // ML inference runs at most once per second (throttled by last_predict guard).
+        subtitle: 'Event-driven · 1 sample / part (~10 s) · AI4I 2020 dataset replay at 1×',
         subtitle: 'OPC UA field data polled at 1 Hz — AI4I 2020 dataset replay',
         charts: [
             { title: 'Torque',        unit: 'Nm',
@@ -1396,7 +1424,9 @@ const DSB_LAYOUT = {
     },
     A2: {
         title: 'A2 — Hydraulic Test Rig',
-        subtitle: 'OPC UA field data polled at 1 Hz — ZeMA condition monitoring dataset',
+        // Cycle-based: 60 s per cycle at 1 Hz → 1 sample/s published.
+        // ML prediction fires once per cycle (every ~60 s real-time).
+        subtitle: 'Cycle-based · 1 Hz sensor stream · prediction every 60 s · ZeMA dataset (2 205 cycles)',
         charts: [
             { title: 'Hydraulic pressures', unit: 'bar',
               series: [1, 2, 3, 4, 5, 6].map(i =>
@@ -1410,7 +1440,10 @@ const DSB_LAYOUT = {
     },
     A3: {
         title: 'A3 — APU Air Compressor',
-        subtitle: 'OPC UA field data polled at 1 Hz — MetroPT-3 dataset (x60 replay)',
+        // Timestamp-based: MetroPT-3 dataset is 1 Hz; replayed at 60× speed
+        // → ~60 real samples/s, 1 dataset-day passes in ~24 min.
+        // ML prediction every 10 s real-time (once 10 history rows are available).
+        subtitle: 'Timestamp-based · 60× replay (1 dataset-day ≈ 24 min) · prediction every 10 s · MetroPT-3',
         charts: [
             { title: 'Pneumatic pressures', unit: 'bar',
               series: [
@@ -2237,6 +2270,47 @@ setInterval(() => {
 setInterval(refreshTelemetryHealth, 2000);
 
 // =====================================================================
+//  RENDER TICKER — 30 fps, fully decoupled from MQTT arrival rate
+//  All visual updates (charts, KPI numbers, detail panel) happen here.
+//  MQTT onMessageArrived only writes to ring buffers — never redraws.
+// =====================================================================
+let _renderLastTs = 0;
+const RENDER_FPS   = 30;
+const RENDER_FRAME = 1000 / RENDER_FPS;   // ~33 ms
+
+// Throttled Chart.js update — only call .update() when data actually changed
+let _vizDirty = false;   // set true by _vizPush; cleared after Chart.js update
+
+// Wrap _vizPush to mark dirty flag
+const _vizPushOrig = _vizPush;
+// (no override needed — we just check buffers directly)
+
+function _renderTick(ts) {
+    requestAnimationFrame(_renderTick);
+    if (ts - _renderLastTs < RENDER_FRAME) return;
+    _renderLastTs = ts;
+
+    // ── Visualisation page ─────────────────────────────────────────
+    if (currentPage === 'visualisation') {
+        _vizRefreshCharts();
+    }
+
+    // ── Analytics page ─────────────────────────────────────────────
+    if (currentPage === 'analytics') {
+        _refreshAnalyticsDynamic();
+    }
+
+    // ── Detail panel (any page) ────────────────────────────────────
+    if (_currentDetailAsset && _dsbCurrent) {
+        // Redraw canvas charts at 30fps for smooth hover + live data
+        for (const c of _dsbCurrent.charts) c.render();
+        // Refresh chips/tiles at ~5fps (every 6th frame) to avoid DOM thrash
+        if (Math.round(ts / RENDER_FRAME) % 6 === 0) {
+            refreshDetailPanel();
+        }
+    }
+}
+requestAnimationFrame(_renderTick);
 //  MESSAGE HANDLER
 // =====================================================================
 function onMessageArrived(message) {
@@ -2257,6 +2331,35 @@ function onMessageArrived(message) {
         try {
             _dsbRouteTopic(topic, typeof v === 'boolean' ? (v ? 1 : 0) : Number(v));
         } catch (_) { /* ignore routing failures for analytics-only topics */ }
+
+        // ── Per-asset timing indicators — always update, independent of main chain ──
+        if (topic.includes('/A1/tool/tool_wear_min')) {
+            const el = document.getElementById('a1-tool-wear');
+            if (el) el.textContent = Number(v).toFixed(0) + ' min';
+        }
+        if (topic.includes('/A1/simulation/part_index')) {
+            const el = document.getElementById('a1-part-index');
+            if (el) el.textContent = '#' + Number(v).toLocaleString('en-US');
+        }
+        if (topic.includes('/A2/simulation/cycle_index')) {
+            const el = document.getElementById('a2-cycle-index');
+            if (el) el.textContent = Number(v) + ' / 2205';
+        }
+        if (topic.includes('/A2/simulation/cycle_second')) {
+            const sec = Number(v);
+            const el = document.getElementById('a2-cycle-second');
+            if (el) el.textContent = sec + ' / 59 s';
+            // Drive the cycle progress bar (0–59 → 0–100%)
+            const bar = document.getElementById('a2-cycle-bar');
+            if (bar) bar.style.width = Math.round((sec / 59) * 100) + '%';
+        }
+        if (topic.includes('/A3/simulation/source_timestamp') && v) {
+            const el = document.getElementById('a3-dataset-ts');
+            if (el) el.textContent = String(v).replace('T', ' ').slice(0, 19);
+        }
+        if (topic.includes('/A3/simulation/row_index')) {
+            // row index element removed from UI
+        }
 
         // ── A1 Milling ──
         if (topic.includes('/A1/analytics/machine_failure') || topic.includes('/A1/status/machine_failure')) {
@@ -2444,19 +2547,13 @@ function onMessageArrived(message) {
                 el.className = 'gauge-value mono ' + (isLoaded ? 'good' : 'warning');
             }
         }
-        else if (topic.includes('/A3/simulation/source_timestamp')) {
-            const el = document.getElementById('a3-dataset-ts');
-            if (el && v) {
-                const tsStr = String(v);
-                el.textContent = tsStr.length > 10 ? tsStr.slice(0, 10) : tsStr;
-            }
-        }
         else if (topic.includes('/plc/system/active_alarms')) {
             try {
                 const activeList = Array.isArray(v) ? v : (typeof payload === 'object' && Array.isArray(payload.active) ? payload.active : []);
                 const a1Count = activeList.filter(a => String(a).startsWith('A1/')).length;
                 const a2Count = activeList.filter(a => String(a).startsWith('A2/')).length;
                 const a3Count = activeList.filter(a => String(a).startsWith('A3/')).length;
+                const totalCount = a1Count + a2Count + a3Count;
 
                 const e1 = document.getElementById('a1-alarms');
                 if (e1) { e1.textContent = a1Count; e1.style.color = a1Count > 0 ? 'var(--accent-red)' : 'var(--accent-green)'; }
@@ -2466,20 +2563,16 @@ function onMessageArrived(message) {
 
                 const e3 = document.getElementById('a3-alarms');
                 if (e3) { e3.textContent = a3Count; e3.style.color = a3Count > 0 ? 'var(--accent-red)' : 'var(--accent-green)'; }
+
+                // Global alarms counter (top bar)
+                const eg = document.getElementById('global-alarms-count');
+                if (eg) { eg.textContent = totalCount; eg.style.color = totalCount > 0 ? 'var(--accent-red)' : 'var(--accent-green)'; }
             } catch (_) {}
         }
 
         // ── A1 per-mode predictions — update detail panel if open ──
-        if (topic.includes('/A1/analytics/mode_')) {
-            if (_currentDetailAsset === 'A1') refreshDetailPanel();
-        }
-        if (currentPage === 'visualisation') _vizRefreshCharts();
-
-        // Live-refresh analytics KPI strip on every message
-        if (currentPage === 'analytics') _refreshAnalyticsDynamic();
-
-        // Live-refresh detail panel if open
-        if (_currentDetailAsset) refreshDetailPanel();
+        // NOTE: no immediate redraws here — the 30fps render ticker handles all
+        // visual updates continuously, decoupled from MQTT arrival rate.
 
     } catch (e) {
         console.error('Parse error:', e);

@@ -1415,6 +1415,7 @@ html, body {
     font-weight: 700;
     font-family: var(--font-mono);
     color: var(--accent-cyan);
+    transition: color 0.4s ease;
 }
 
 /* Live indicator dot */
@@ -1438,4 +1439,29 @@ html, body {
 @media (max-width: 900px) {
     .viz-grid { grid-template-columns: 1fr; }
     .viz-kpi-strip { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ================================================================
+   SMOOTH VALUE UPDATES — prevents jarring text jumps
+   Applied via JS: element.classList.add('val-flash') on change
+   ================================================================ */
+@keyframes val-flash {
+    0%   { opacity: 0.45; }
+    100% { opacity: 1; }
+}
+
+/* All live numeric outputs get smooth transitions */
+.gauge-value,
+.gauge-value.mono,
+.kpi-card-value,
+.viz-kpi-value,
+.chart-stat-value,
+.kpi-mini-value,
+.dsb-tile .value {
+    transition: color 0.35s ease, opacity 0.25s ease;
+}
+
+/* Flash animation played once whenever a value changes */
+.val-flash {
+    animation: val-flash 0.3s ease-out forwards;
 }

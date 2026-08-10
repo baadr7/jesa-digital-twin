@@ -140,7 +140,7 @@
                     </div>
                     <div>
                         <h2>A1 — CNC Milling</h2>
-                        <span class="card-tag">Supervised Classification</span>
+                        <span class="card-tag">Event-driven · ~10 s / part</span>
                     </div>
                     <div class="status-chip" id="a1-chip">Initializing</div>
                 </div>
@@ -169,6 +169,17 @@
                             <span class="gauge-value mono" id="a1-alarms" style="font-size:13px;color:var(--accent-green)">0</span>
                         </div>
                     </div>
+                    <!-- Timing row: event index + tool wear accumulation -->
+                    <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">Part #</span>
+                            <span class="gauge-value mono" id="a1-part-index" style="font-size:11px">—</span>
+                        </div>
+                        <div class="gauge-block">
+                            <span class="gauge-label">Tool wear</span>
+                            <span class="gauge-value mono" id="a1-tool-wear" style="font-size:11px">— min</span>
+                        </div>
+                    </div>
                     <div class="update-meta">Last update <span id="a1-last">Waiting for data</span></div>
                 </div>
             </div>
@@ -181,7 +192,7 @@
                     </div>
                     <div>
                         <h2>A2 — Hydraulic System</h2>
-                        <span class="card-tag">Multi-target Classification</span>
+                        <span class="card-tag">Cycle-based · 1 Hz · pred/60 s</span>
                     </div>
                     <div class="status-chip" id="a2-chip">Initializing</div>
                 </div>
@@ -210,6 +221,21 @@
                             <span class="gauge-value mono" id="a2-alarms" style="font-size:13px;color:var(--accent-green)">0</span>
                         </div>
                     </div>
+                    <!-- Timing row: cycle index + cycle progress -->
+                    <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">Cycle</span>
+                            <span class="gauge-value mono" id="a2-cycle-index" style="font-size:11px">— / 2205</span>
+                        </div>
+                        <div class="gauge-block">
+                            <span class="gauge-label">Cycle progress</span>
+                            <span class="gauge-value mono" id="a2-cycle-second" style="font-size:11px">— / 59 s</span>
+                        </div>
+                    </div>
+                    <!-- Cycle progress bar -->
+                    <div class="progress-bar-track" style="margin-top:2px">
+                        <div class="progress-bar-fill a2-bar" id="a2-cycle-bar" style="width:0%;background:linear-gradient(90deg,var(--a2-color),#00ffc8)"></div>
+                    </div>
                     <div class="update-meta">Last update <span id="a2-last">Waiting for data</span></div>
                 </div>
             </div>
@@ -222,7 +248,7 @@
                     </div>
                     <div>
                         <h2>A3 — APU Compressor</h2>
-                        <span class="card-tag">Unsupervised Anomaly Detection</span>
+                        <span class="card-tag">Timestamp · 60× replay · pred/10 s</span>
                     </div>
                     <div class="status-chip" id="a3-chip">Initializing</div>
                 </div>
@@ -251,14 +277,15 @@
                             <span class="gauge-value mono" id="a3-load-state" style="font-size:11px">—</span>
                         </div>
                     </div>
+                    <!-- Timing row: dataset timestamp + alarms -->
                     <div class="gauge-row" style="margin-top:4px">
+                        <div class="gauge-block">
+                            <span class="gauge-label">Dataset Timestamp</span>
+                            <span class="gauge-value mono" id="a3-dataset-ts" style="font-size:10px;letter-spacing:0.02em">—</span>
+                        </div>
                         <div class="gauge-block">
                             <span class="gauge-label">Alarms</span>
                             <span class="gauge-value mono" id="a3-alarms" style="font-size:13px;color:var(--accent-green)">0</span>
-                        </div>
-                        <div class="gauge-block">
-                            <span class="gauge-label">Dataset Time</span>
-                            <span class="gauge-value mono" id="a3-dataset-ts" style="font-size:11px">—</span>
                         </div>
                     </div>
                     <div class="update-meta">Last update <span id="a3-last">Waiting for data</span></div>
@@ -279,6 +306,6 @@
         <div id="detail-content"></div>
     </div>
 
-    <script type="module" src="app.js?v=22"></script>
+    <script type="module" src="app.js?v=24"></script>
 </body>
 </html>

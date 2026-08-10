@@ -1288,7 +1288,7 @@ const _a3 = {
 };
 
 // A2 : tracker le dernier message analytics pour STALE guard
-const _a2LastAnalyticsTs = 0;
+let _a2LastAnalyticsTs = 0;
 
 // =====================================================================
 //  ASSET DASHBOARD — Copie parfaite de sim/tools/dashboard.html
@@ -1338,6 +1338,11 @@ const _dsbUnsToKey = {
     'A2@condition/pump_leakage':           'Condition/PumpLeakage',
     'A2@condition/accumulator_pressure_bar':'Condition/AccumulatorPressure_bar',
     'A2@condition/stable_flag':            'Condition/StableFlag',
+    // analytics topics (published by ml_inference_service)
+    'A2@analytics/cooler_condition':       'Condition/CoolerCondition_pct',
+    'A2@analytics/valve_condition':        'Condition/ValveCondition_pct',
+    'A2@analytics/pump_leakage':           'Condition/PumpLeakage',
+    'A2@analytics/accumulator_pressure':   'Condition/AccumulatorPressure_bar',
     'A2@simulation/cycle_index':           'Simulation/CycleIndex',
     'A2@simulation/cycle_second':          'Simulation/CycleSecond',
 

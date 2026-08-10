@@ -2398,8 +2398,11 @@ function onMessageArrived(message) {
         //   valve:  100=optimal, 90=small lag, 80=severe lag, 73=close to total failure
         //   pump:   0=no leak, 1=weak leak, 2=severe leak
         //   accum.: 130=optimal, 115=slightly reduced, 100=severely reduced, 90=close to failure
-        else if (topic.includes('/A2/analytics/cooler_condition')) {
-            _a2LastAnalyticsTs = Date.now();
+        else if (topic.includes('/A2/analytics/cooler_condition') ||
+                 topic.includes('/A2/condition/cooler_condition_pct')) {
+            // Fired by ML inference (analytics/) every ~60s OR Node-RED OPC UA (condition/) every 1s
+            // Both carry the same ZeMA class integer — same display logic applies
+            if (topic.includes('/A2/analytics/')) _a2LastAnalyticsTs = Date.now();
 
             // Map class → health % and label
             const coolerMap = { 100: { pct: 100, txt: 'Optimal',      cls: 'healthy'  },
@@ -2413,14 +2416,17 @@ function onMessageArrived(message) {
             setChip('a2-chip', cm.cls.charAt(0).toUpperCase() + cm.cls.slice(1), cm.cls);
             setCardGlow('card-a2', 'asset-card ' + cm.cls + '-glow');
             setAssetGlow('A2', COLORS[cm.cls === 'healthy' ? 'good' : cm.cls]);
-            _logEvent(`A2 — Cooler: ${cm.txt} (class ${v})`, cm.cls === 'healthy' ? 'info' : cm.cls);
+            // Only log events from analytics/ (ML) to avoid 1Hz log spam
+            if (topic.includes('/A2/analytics/'))
+                _logEvent(`A2 — Cooler: ${cm.txt} (class ${v})`, cm.cls === 'healthy' ? 'info' : cm.cls);
             // ── Viz ring buffer push — use health % for chart ──
             a2LatestLabels.cooler = `${cm.txt} (${cm.pct}%)`;
             _vizPush(vizData.A2.cooler,     cm.pct);
             _vizPush(vizData.A2.timestamps, _vizTimestamp());
         }
-        else if (topic.includes('/A2/analytics/valve_condition')) {
-            // Map class → health %
+        else if (topic.includes('/A2/analytics/valve_condition') ||
+                 topic.includes('/A2/condition/valve_condition_pct')) {
+            // Fired by ML inference (analytics/) every ~60s OR Node-RED OPC UA (condition/) every 1s
             const valveMap = { 100: { pct: 100, txt: 'Optimal' },
                                 90: { pct:  85, txt: 'Small lag' },
                                 80: { pct:  50, txt: 'Severe lag' },
@@ -2429,25 +2435,30 @@ function onMessageArrived(message) {
             const vstate = vm.pct >= 90 ? 'good' : vm.pct >= 50 ? 'warning' : 'critical';
             document.getElementById('a2-valve').textContent = vm.txt + ' (class ' + v + ')';
             document.getElementById('a2-valve').className = 'gauge-value mono ' + vstate;
-            _logEvent(`A2 — Valve: ${vm.txt} (class ${v})`, vstate === 'good' ? 'info' : vstate);
+            if (topic.includes('/A2/analytics/'))
+                _logEvent(`A2 — Valve: ${vm.txt} (class ${v})`, vstate === 'good' ? 'info' : vstate);
             // ── Viz ring buffer push — use health % ──
             a2LatestLabels.valve = `${vm.txt} (${vm.pct}%)`;
             _vizPush(vizData.A2.valve, vm.pct);
         }
-        else if (topic.includes('/A2/analytics/pump_leakage')) {
-            const pumpMap = { 0: { txt: 'No leak',      cls: 'good'     },
-                              1: { txt: 'Weak leak',    cls: 'warning'  },
-                              2: { txt: 'Severe leak',  cls: 'critical' } };
+        else if (topic.includes('/A2/analytics/pump_leakage') ||
+                 topic.includes('/A2/condition/pump_leakage')) {
+            const pumpMap = { 0: { txt: 'No leak',     cls: 'good'     },
+                              1: { txt: 'Weak leak',   cls: 'warning'  },
+                              2: { txt: 'Severe leak', cls: 'critical' } };
             const pm = pumpMap[v] ?? { txt: 'Unknown', cls: 'warning' };
-            _logEvent(`A2 — Pump: ${pm.txt} (class ${v})`, pm.cls === 'good' ? 'info' : pm.cls);
+            if (topic.includes('/A2/analytics/'))
+                _logEvent(`A2 — Pump: ${pm.txt} (class ${v})`, pm.cls === 'good' ? 'info' : pm.cls);
         }
-        else if (topic.includes('/A2/analytics/accumulator_pressure')) {
+        else if (topic.includes('/A2/analytics/accumulator_pressure') ||
+                 topic.includes('/A2/condition/accumulator_pressure_bar')) {
             const accMap = { 130: { txt: 'Optimal',          cls: 'good'     },
                              115: { txt: 'Slightly reduced',  cls: 'warning'  },
                              100: { txt: 'Severely reduced',  cls: 'critical' },
                               90: { txt: 'Near-failure',      cls: 'critical' } };
             const am = accMap[v] ?? { txt: 'Unknown', cls: 'warning' };
-            _logEvent(`A2 — Accumulator: ${am.txt} (class ${v})`, am.cls === 'good' ? 'info' : am.cls);
+            if (topic.includes('/A2/analytics/'))
+                _logEvent(`A2 — Accumulator: ${am.txt} (class ${v})`, am.cls === 'good' ? 'info' : am.cls);
         }
 
         // ── A3 APU Compressor ──

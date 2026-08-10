@@ -263,6 +263,7 @@ class A2Predictor:
 
     def update(self, topic, value):
         suffix = topic.split("A2/")[-1]
+
         if suffix == "simulation/cycle_index":
             cycle_index = int(value)
             if cycle_index != self.last_cycle_index and self.last_cycle_index != -1:
@@ -275,6 +276,10 @@ class A2Predictor:
         sensor = self.map_topic_to_sensor(topic)
         if sensor:
             self.state[sensor].append(float(value))
+            # Immediate initial prediction on startup as soon as sensor samples arrive
+            if not self.cycle_features and len(self.state.get("PS1", [])) >= 3:
+                return self.process_cycle()
+
         return None
 
     def process_cycle(self):

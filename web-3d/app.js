@@ -2405,6 +2405,52 @@ function onMessageArrived(message) {
             _vizPush(vizData.A3.timestamps,   _vizTimestamp());
         }
 
+        // ── Derived Metrics & Card Gauges ──
+        else if (topic.includes('/A1/derived/power_kw')) {
+            const el = document.getElementById('a1-power');
+            if (el) el.textContent = Number(v).toFixed(2) + ' kW';
+        }
+        else if (topic.includes('/A2/derived/cooler_delta_t_c')) {
+            const el = document.getElementById('a2-dt');
+            if (el) el.textContent = Number(v).toFixed(1) + ' °C';
+        }
+        else if (topic.includes('/A3/derived/comp_duty_pct_5min')) {
+            const el = document.getElementById('a3-comp-duty');
+            if (el) el.textContent = Number(v).toFixed(1) + '%';
+        }
+        else if (topic.includes('/A3/digital/comp')) {
+            const el = document.getElementById('a3-load-state');
+            if (el) {
+                const isLoaded = (v === true || v === 1);
+                el.textContent = isLoaded ? 'LOADED' : 'UNLOADED';
+                el.className = 'gauge-value mono ' + (isLoaded ? 'good' : 'warning');
+            }
+        }
+        else if (topic.includes('/A3/simulation/source_timestamp')) {
+            const el = document.getElementById('a3-dataset-ts');
+            if (el && v) {
+                const tsStr = String(v);
+                el.textContent = tsStr.length > 10 ? tsStr.slice(0, 10) : tsStr;
+            }
+        }
+        else if (topic.includes('/plc/system/active_alarms')) {
+            try {
+                const activeList = Array.isArray(v) ? v : (typeof payload === 'object' && Array.isArray(payload.active) ? payload.active : []);
+                const a1Count = activeList.filter(a => String(a).startsWith('A1/')).length;
+                const a2Count = activeList.filter(a => String(a).startsWith('A2/')).length;
+                const a3Count = activeList.filter(a => String(a).startsWith('A3/')).length;
+
+                const e1 = document.getElementById('a1-alarms');
+                if (e1) { e1.textContent = a1Count; e1.style.color = a1Count > 0 ? 'var(--accent-red)' : 'var(--accent-green)'; }
+
+                const e2 = document.getElementById('a2-alarms');
+                if (e2) { e2.textContent = a2Count; e2.style.color = a2Count > 0 ? 'var(--accent-red)' : 'var(--accent-green)'; }
+
+                const e3 = document.getElementById('a3-alarms');
+                if (e3) { e3.textContent = a3Count; e3.style.color = a3Count > 0 ? 'var(--accent-red)' : 'var(--accent-green)'; }
+            } catch (_) {}
+        }
+
         // ── A1 per-mode predictions — update detail panel if open ──
         if (topic.includes('/A1/analytics/mode_')) {
             if (_currentDetailAsset === 'A1') refreshDetailPanel();

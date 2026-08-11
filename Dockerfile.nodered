@@ -2,22 +2,32 @@
 #
 # Base: nodered/node-red:4.0.9-18 (Node.js 18 LTS, Alpine)
 #
+# WSL2 fix: pass --jitless to ALL node invocations via NODE_OPTIONS during
+# build and runtime. This prevents the V8 TurboFan JIT crash on WSL2 kernels.
+#
+# Extra nodes installed into /data (Node-RED userDir) at build time.
 # flows.json + settings.js are bind-mounted at runtime.
 
-FROM nodered/node-red:4.0.9-20
+FROM nodered/node-red:4.0.9-18
+
+# Set --jitless for ALL node/npm calls in this layer (build + runtime)
+ENV NODE_OPTIONS="--jitless"
 
 USER root
 RUN apk add --no-cache python3 make g++ linux-headers
 
-WORKDIR /usr/src/node-red
-COPY infra/nodered/package.json /usr/src/node-red/package.json
+# Install extra nodes into /data (Node-RED userDir) at build time
+WORKDIR /data
+COPY infra/nodered/package.json /data/package.json
 
-RUN npm install --no-audit --no-fund \
-    && find node_modules -mindepth 2 -name hexy -type d -exec rm -rf {} + 2>/dev/null || true \
-    && chown -R node-red:node-red /usr/src/node-red
+RUN node --jitless /usr/local/bin/npm install --no-audit --no-fund \
+        node-red-contrib-opcua@0.2.354 \
+        node-red-dashboard@3.6.5 \
+        node-red-node-ui-table@0.4.5 \
+    && find /data/node_modules -mindepth 2 -name hexy -type d -exec rm -rf {} + 2>/dev/null || true \
+    && chown -R node-red:node-red /data
 
 USER node-red
 WORKDIR /usr/src/node-red
 
-LABEL jesa.version="1.0" jesa.node-red="4.0.9" jesa.node="20"
-
+LABEL jesa.version="1.2" jesa.node-red="4.0.9" jesa.node="18"

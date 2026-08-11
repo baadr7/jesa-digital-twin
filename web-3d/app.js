@@ -1200,6 +1200,7 @@ controls.maxDistance = 80;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.3;
 controls.target.set(0, 4, 0);
+controls.update(); // apply initial position immediately
 
 // =====================================================================
 //  LIGHTING — Industrial feel
@@ -2310,15 +2311,15 @@ function refreshTelemetryHealth() {
 }
 
 function resetCamera() {
-    // If scene was physically lifted, bring it back down
     if (sceneLiftedCount > 0) {
         _applyPanelLift(-PANEL_LIFT * sceneLiftedCount);
         sceneLiftedCount = 0;
         panelLiftActive = false;
     }
     controls.autoRotate = true;
-    controls.target.set(0, 4, 0);
-    camera.position.set(0, 18, 50);
+    controls.target.set(0, - 4, 0);
+    camera.position.set(0, 8, 50);
+    controls.update(); // required — OrbitControls ignores position changes without this
     document.querySelectorAll('.asset-card').forEach(c => c.style.outline = 'none');
 }
 
@@ -2774,6 +2775,7 @@ renderer.domElement.addEventListener('click', (e) => {
             const raisedY = pos.y; // pos.y already updated by raisePanelScene
             controls.target.set(pos.x, raisedY , pos.z);
             camera.position.set(pos.x + 8, raisedY + 5, pos.z + 30);
+            controls.update();
 
             setTimeout(() => { controls.autoRotate = true; }, 8000);
             break;
@@ -2796,7 +2798,8 @@ document.querySelectorAll('.asset-card').forEach(card => {
         const raisedY = pos.y; // pos.y already updated by raisePanelScene
         controls.target.set(pos.x, raisedY , pos.z);
         camera.position.set(pos.x + 8, raisedY + 5, pos.z + 30);
-        
+        controls.update();
+
         setTimeout(() => { controls.autoRotate = true; }, 8000);
     });
 });

@@ -246,6 +246,10 @@ async def run_gateway(
         len(pollers), 1.0 / poll_interval, mqtt_host, mqtt_port,
     )
 
+    # Start derived-data engine on a background thread
+    derived = DerivedPublisher(mqtt_host, mqtt_port)
+    derived.start()
+
     # Status reporter
     async def status_reporter():
         while True:
@@ -264,5 +268,185 @@ async def run_gateway(
     except asyncio.CancelledError:
         pass
     finally:
+        derived.stop()
         publisher.stop()
         log.info("Gateway stopped. Total messages: %d", publisher.message_count)
+
+
+# ===========================================================================
+#  DERIVED DATA ENGINE — replicates Node-RED Tab 02 logic in pure Python
+#  Subscribes to raw UNS topics, computes derived values, republishes them.
+# ===========================================================================
+
+import collections as _collections
+import math as _math
+import threading as _threading
+
+
+class DerivedPublisher:
+    """Subscribes to raw telemetry topics and publishes derived KPIs.
+
+    Derived topics published (matches what Node-RED Tab 02 computed):
+
+    A1:
+      .../A1/derived/power_kw             = torque * speed * 2π/60 / 1000
+      .../A1/derived/delta_t_k            = process_temp - air_temp
+
+    A2:
+      .../A2/derived/cooler_delta_t_c     = TS1 - TS4
+
+    A3:
+      .../A3/derived/comp_duty_pct_5min   = rolling 5-min COMP duty %
+      .../A3/derived/load_state           = idle|offload|load|peak (from current_a)
+    """
+
+    _PREFIX = "jesa/site1"
+    _COMP_WINDOW_S = 300  # 5 minutes
+
+    def __init__(self, host: str = config.MQTT_HOST, port: int = config.MQTT_PORT):
+        self._host = host
+        self._port = port
+        self._thread: _threading.Thread | None = None
+        self._client: mqtt.Client | None = None
+
+        # A1 state
+        self._a1: dict = {}
+
+        # A2 state
+        self._a2: dict = {}
+
+        # A3 state
+        self._a3: dict = {}
+        self._a3_comp_history: _collections.deque = _collections.deque()  # (timestamp, 0|1)
+
+    # ── public ──────────────────────────────────────────────────────────────
+
+    def start(self) -> None:
+        self._thread = _threading.Thread(target=self._run, daemon=True, name="derived-pub")
+        self._thread.start()
+        log.info("DerivedPublisher started.")
+
+    def stop(self) -> None:
+        if self._client:
+            try:
+                self._client.disconnect()
+            except Exception:
+                pass
+
+    # ── internal ────────────────────────────────────────────────────────────
+
+    def _run(self) -> None:
+        c = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id="jesa-derived-engine",
+            protocol=mqtt.MQTTv5,
+        )
+        c.on_connect    = self._on_connect
+        c.on_message    = self._on_message
+        c.reconnect_delay_set(min_delay=1, max_delay=15)
+        self._client = c
+        while True:
+            try:
+                c.connect(self._host, self._port, keepalive=60)
+                c.loop_forever()
+            except (OSError, ConnectionRefusedError):
+                import time as _time
+                log.warning("DerivedPublisher: broker not available, retrying in 5s")
+                _time.sleep(5)
+
+    def _on_connect(self, client, userdata, flags, rc, props=None) -> None:
+        if rc == 0:
+            log.info("DerivedPublisher: connected to MQTT broker.")
+            client.subscribe(f"{self._PREFIX}/workshop/milling/A1/#")
+            client.subscribe(f"{self._PREFIX}/workshop/hydraulics/A2/#")
+            client.subscribe(f"{self._PREFIX}/fleet/apu/A3/#")
+        else:
+            log.error("DerivedPublisher: MQTT connect failed rc=%d", rc)
+
+    def _on_message(self, client, userdata, msg) -> None:
+        import time as _time
+        try:
+            payload = json.loads(msg.payload.decode())
+            v = payload.get("v")
+            if v is None or payload.get("q") == "stale":
+                return
+        except Exception:
+            return
+
+        topic = msg.topic
+        ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+        def pub(suffix: str, value: object) -> None:
+            self._client.publish(
+                suffix,
+                json.dumps({"ts": ts, "v": value, "q": "good"}),
+                qos=0,
+            )
+
+        # ── A1 derived ───────────────────────────────────────────────────
+        if "/A1/" in topic:
+            P = f"{self._PREFIX}/workshop/milling/A1"
+            s = self._a1
+            if topic.endswith("/drive/torque_nm"):
+                s["torque"] = float(v)
+            elif topic.endswith("/drive/rotational_speed_rpm"):
+                s["speed"] = float(v)
+            elif topic.endswith("/process/air_temperature_k"):
+                s["air_t"] = float(v)
+            elif topic.endswith("/process/process_temperature_k"):
+                s["proc_t"] = float(v)
+            elif topic.endswith("/tool/tool_wear_min"):
+                s["wear"] = float(v)
+            else:
+                return
+
+            if "torque" in s and "speed" in s:
+                pw_w = s["torque"] * s["speed"] * 2 * _math.pi / 60
+                pub(f"{P}/derived/power_kw", round(pw_w / 1000, 4))
+
+            if "air_t" in s and "proc_t" in s:
+                dt = s["proc_t"] - s["air_t"]
+                pub(f"{P}/derived/delta_t_k", round(dt, 3))
+
+        # ── A2 derived ───────────────────────────────────────────────────
+        elif "/A2/" in topic:
+            P = f"{self._PREFIX}/workshop/hydraulics/A2"
+            s = self._a2
+            if topic.endswith("/thermal/ts1_c"):
+                s["ts1"] = float(v)
+            elif topic.endswith("/thermal/ts4_c"):
+                s["ts4"] = float(v)
+            else:
+                return
+
+            if "ts1" in s and "ts4" in s:
+                pub(f"{P}/derived/cooler_delta_t_c", round(s["ts1"] - s["ts4"], 3))
+
+        # ── A3 derived ───────────────────────────────────────────────────
+        elif "/A3/" in topic:
+            import time as _time
+            P = f"{self._PREFIX}/fleet/apu/A3"
+            s = self._a3
+            if topic.endswith("/digital/comp"):
+                comp_val = 1 if (v is True or v == 1) else 0
+                now = _time.time()
+                self._a3_comp_history.append((now, comp_val))
+                # Trim to 5-minute window
+                cutoff = now - self._COMP_WINDOW_S
+                while self._a3_comp_history and self._a3_comp_history[0][0] < cutoff:
+                    self._a3_comp_history.popleft()
+                if len(self._a3_comp_history) >= 10:
+                    duty = sum(e[1] for e in self._a3_comp_history) / len(self._a3_comp_history) * 100
+                    pub(f"{P}/derived/comp_duty_pct_5min", round(duty, 1))
+                s["comp"] = comp_val
+            elif topic.endswith("/motor/current_a"):
+                cur = float(v)
+                s["current"] = cur
+                state = "idle"    if cur < 1.0 else \
+                        "offload" if cur < 5.5 else \
+                        "load"    if cur < 8.5 else "peak"
+                self._client.publish(
+                    f"{P}/derived/load_state",
+                    json.dumps({"ts": ts, "v": state, "current_a": round(cur, 3), "q": "good"}),
+                    qos=0,
+                )

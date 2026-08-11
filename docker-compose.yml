@@ -54,12 +54,24 @@ services:
     volumes:
       - ./infra/nodered/flows.json:/data/flows.json
       - ./infra/nodered/settings.js:/data/settings.js:ro
+    # Override entrypoint: pass --jitless directly to node to bypass WSL2 JIT crash.
+    # NODE_OPTIONS cannot be used here — it conflicts with native modules loaded
+    # before the V8 flag takes effect. Direct node invocation avoids the race.
+    working_dir: /usr/src/node-red
+    entrypoint:
+      - "node"
+      - "--jitless"
+      - "--max-old-space-size=512"
+      - "node_modules/node-red/red.js"
+      - "--userDir"
+      - "/data"
+      - "flows.json"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:1880/settings || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 20s
 
 
 

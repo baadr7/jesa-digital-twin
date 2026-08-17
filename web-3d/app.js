@@ -1170,7 +1170,7 @@ scene.background = new THREE.Color(0x0f172a);
 scene.fog = new THREE.FogExp2(0x0f172a, 0.008);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
-camera.position.set(0, 18, 50);
+camera.position.set(0, 14, 50);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1199,7 +1199,7 @@ controls.minDistance = 15;
 controls.maxDistance = 80;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.3;
-controls.target.set(0, 4, 0);
+controls.target.set(0, - 3 , 0);
 controls.update(); // apply initial position immediately
 
 // =====================================================================
@@ -2317,8 +2317,8 @@ function resetCamera() {
         panelLiftActive = false;
     }
     controls.autoRotate = true;
-    controls.target.set(0, - 4, 0);
-    camera.position.set(0, 8, 50);
+    controls.target.set(0, -3 , 0);
+    camera.position.set(0, 14 , 50);
     controls.update(); // required — OrbitControls ignores position changes without this
     document.querySelectorAll('.asset-card').forEach(c => c.style.outline = 'none');
 }
@@ -2773,8 +2773,8 @@ renderer.domElement.addEventListener('click', (e) => {
 
             // Point camera at the raised asset position
             const raisedY = pos.y; // pos.y already updated by raisePanelScene
-            controls.target.set(pos.x, raisedY , pos.z);
-            camera.position.set(pos.x + 8, raisedY + 5, pos.z + 30);
+            controls.target.set(pos.x, raisedY - 7 , pos.z);
+            camera.position.set(pos.x + 8, raisedY + 10, pos.z + 40);
             controls.update();
 
             setTimeout(() => { controls.autoRotate = true; }, 8000);
@@ -2796,8 +2796,8 @@ document.querySelectorAll('.asset-card').forEach(card => {
 
         // Point camera at the raised asset position
         const raisedY = pos.y; // pos.y already updated by raisePanelScene
-        controls.target.set(pos.x, raisedY , pos.z);
-        camera.position.set(pos.x + 8, raisedY + 5, pos.z + 30);
+        controls.target.set(pos.x, raisedY - 7 , pos.z);
+        camera.position.set(pos.x + 8, raisedY + 10 , pos.z + 40);
         controls.update();
 
         setTimeout(() => { controls.autoRotate = true; }, 8000);

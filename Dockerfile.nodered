@@ -1,33 +1,29 @@
-# JESA Digital Twin — Node-RED Gateway
+# JESA Digital Twin - Node-RED Gateway
 #
-# Base: nodered/node-red:4.0.9-18 (Node.js 18 LTS, Alpine)
-#
-# WSL2 fix: pass --jitless to ALL node invocations via NODE_OPTIONS during
-# build and runtime. This prevents the V8 TurboFan JIT crash on WSL2 kernels.
-#
-# Extra nodes installed into /data (Node-RED userDir) at build time.
-# flows.json + settings.js are bind-mounted at runtime.
+# Base: nodered/node-red:4.0.9-20 (Node.js 20 LTS, Alpine)
 
-FROM nodered/node-red:4.0.9-18
-
-# Set --jitless for ALL node/npm calls in this layer (build + runtime)
-ENV NODE_OPTIONS="--jitless"
+FROM nodered/node-red:4.0.9-20
 
 USER root
-RUN apk add --no-cache python3 make g++ linux-headers
 
-# Install extra nodes into /data (Node-RED userDir) at build time
-WORKDIR /data
-COPY infra/nodered/package.json /data/package.json
+RUN apk add --no-cache openssl
 
-RUN node --jitless /usr/local/bin/npm install --no-audit --no-fund \
-        node-red-contrib-opcua@0.2.354 \
-        node-red-dashboard@3.6.5 \
-        node-red-node-ui-table@0.4.5 \
-    && find /data/node_modules -mindepth 2 -name hexy -type d -exec rm -rf {} + 2>/dev/null || true \
-    && chown -R node-red:node-red /data
+# Prepare /opt/nodered-modules directory
+WORKDIR /opt/nodered-modules
+COPY infra/nodered/package.json /opt/nodered-modules/package.json
+COPY infra/nodered/node_modules /opt/nodered-modules/node_modules
+
+# Copy entrypoint wrapper
+COPY entrypoint-nodered.sh /usr/local/bin/entrypoint-nodered.sh
+RUN chmod +x /usr/local/bin/entrypoint-nodered.sh
+
+# Ensure proper permissions for node-red user
+RUN chown -R node-red:node-red /opt/nodered-modules /usr/local/bin/entrypoint-nodered.sh
 
 USER node-red
 WORKDIR /usr/src/node-red
 
-LABEL jesa.version="1.2" jesa.node-red="4.0.9" jesa.node="18"
+ENTRYPOINT ["/usr/local/bin/entrypoint-nodered.sh"]
+CMD ["node", "--jitless", "--max-old-space-size=512", "node_modules/node-red/red.js", "--userDir", "/data", "flows.json"]
+
+LABEL jesa.version="2.1" jesa.node-red="4.0.9" jesa.node="20" jesa.gateway="Node-RED-only"

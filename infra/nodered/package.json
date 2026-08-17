@@ -1,6 +1,6 @@
 {
-  "name": "jesa-nodered",
-  "description": "JESA Digital Twin — Node-RED UNS Gateway packages",
+  "name": "jesa-nodered-palette",
+  "description": "JESA Digital Twin — Node-RED palette packages",
   "version": "1.0.0",
   "private": true,
   "dependencies": {

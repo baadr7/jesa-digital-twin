@@ -223,6 +223,8 @@ class A2Predictor:
         self.cycle_features: collections.deque = collections.deque(maxlen=10)
         self.models_loaded = False
         self.last_cycle_index = -1
+        self._last_cycle_second = -1
+        self._last_cycle_process_ts = 0.0
 
         # Metrics
         self.cycle_count = 0
@@ -235,10 +237,18 @@ class A2Predictor:
             cfg = joblib.load(f"{MODEL_DIR}/a2_shared_config.joblib")
             self.scaler = cfg['scaler']
             self.feature_columns = cfg['feature_columns']
-            self.model_cooler      = joblib.load(f"{MODEL_DIR}/a2_cooler_classifier.joblib")['model']
-            self.model_valve       = joblib.load(f"{MODEL_DIR}/a2_valve_classifier.joblib")['model']
-            self.model_pumpleak    = joblib.load(f"{MODEL_DIR}/a2_pumpleak_classifier.joblib")['model']
-            self.model_accumulator = joblib.load(f"{MODEL_DIR}/a2_accumulator_classifier.joblib")['model']
+            bundle_cooler      = joblib.load(f"{MODEL_DIR}/a2_cooler_classifier.joblib")
+            bundle_valve       = joblib.load(f"{MODEL_DIR}/a2_valve_classifier.joblib")
+            bundle_pumpleak    = joblib.load(f"{MODEL_DIR}/a2_pumpleak_classifier.joblib")
+            bundle_accumulator = joblib.load(f"{MODEL_DIR}/a2_accumulator_classifier.joblib")
+            self.model_cooler       = bundle_cooler['model']
+            self.model_valve        = bundle_valve['model']
+            self.model_pumpleak     = bundle_pumpleak['model']
+            self.model_accumulator  = bundle_accumulator['model']
+            self.le_cooler       = bundle_cooler.get('label_encoder')
+            self.le_valve        = bundle_valve.get('label_encoder')
+            self.le_pumpleak     = bundle_pumpleak.get('label_encoder')
+            self.le_accumulator  = bundle_accumulator.get('label_encoder')
             self.models_loaded = True
             log.info("A2 models loaded successfully.")
         except Exception as e:
@@ -263,21 +273,40 @@ class A2Predictor:
 
     def update(self, topic, value):
         suffix = topic.split("A2/")[-1]
+        now_ts = time.time()
 
         if suffix == "simulation/cycle_index":
             cycle_index = int(value)
             if cycle_index != self.last_cycle_index and self.last_cycle_index != -1:
+                self._last_cycle_process_ts = now_ts
                 res = self.process_cycle()
                 self.last_cycle_index = cycle_index
                 return res
             self.last_cycle_index = cycle_index
             return None
 
+        if suffix == "simulation/cycle_second":
+            cs = int(value)
+            # End-of-cycle trigger: second 59 wraps to 0 on next tick
+            if cs == 59 and self._last_cycle_second != 59:
+                self._last_cycle_second = 59
+                self._last_cycle_process_ts = now_ts
+                return self.process_cycle()
+            self._last_cycle_second = cs
+
+        # Watchdog fallback — force a cycle inference every 65 s max even
+        # if upstream cycle_index never changes. Guarantees live A2 output
+        # regardless of Node-RED / simulator forwarding quirks.
+        if now_ts - self._last_cycle_process_ts >= 65.0 and self.last_cycle_index != -1:
+            self._last_cycle_process_ts = now_ts
+            return self.process_cycle()
+
         sensor = self.map_topic_to_sensor(topic)
         if sensor:
             self.state[sensor].append(float(value))
             # Immediate initial prediction on startup as soon as sensor samples arrive
             if not self.cycle_features and len(self.state.get("PS1", [])) >= 3:
+                self._last_cycle_process_ts = now_ts
                 return self.process_cycle()
 
         return None
@@ -324,10 +353,20 @@ class A2Predictor:
         x = np.array([[row.get(c, 0.0) for c in self.feature_columns]])
         x_scaled = self.scaler.transform(x)
 
-        raw_cooler = int(self.model_cooler.predict(x_scaled)[0])
-        raw_valve  = int(self.model_valve.predict(x_scaled)[0])
-        raw_pump   = int(self.model_pumpleak.predict(x_scaled)[0])
-        raw_accum  = int(self.model_accumulator.predict(x_scaled)[0])
+        raw_cooler_enc = int(self.model_cooler.predict(x_scaled)[0])
+        raw_valve_enc  = int(self.model_valve.predict(x_scaled)[0])
+        raw_pump_enc   = int(self.model_pumpleak.predict(x_scaled)[0])
+        raw_accum_enc  = int(self.model_accumulator.predict(x_scaled)[0])
+
+        # Decode XGBoost encoded labels -> semantic condition values
+        # Cooler:      0/1/2   -> 3 / 20 / 100
+        # Valve:       0/1/2/3 -> 73 / 80 / 90 / 100
+        # PumpLeak:    0/1/2   -> 0 / 1 / 2
+        # Accumulator: 0/1/2/3 -> 90 / 100 / 115 / 130
+        raw_cooler = int(self.le_cooler.inverse_transform([raw_cooler_enc])[0]) if self.le_cooler else raw_cooler_enc
+        raw_valve  = int(self.le_valve.inverse_transform([raw_valve_enc])[0])   if self.le_valve  else raw_valve_enc
+        raw_pump   = int(self.le_pumpleak.inverse_transform([raw_pump_enc])[0]) if self.le_pumpleak else raw_pump_enc
+        raw_accum  = int(self.le_accumulator.inverse_transform([raw_accum_enc])[0]) if self.le_accumulator else raw_accum_enc
 
         self.cycle_count += 1
         if raw_cooler < 100:

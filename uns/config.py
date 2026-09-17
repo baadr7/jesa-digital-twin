@@ -55,9 +55,51 @@ class AssetMapping:
     url: str                    # e.g. "opc.tcp://127.0.0.1:4841/jesa/a1"
     area: str                   # ISA-95 area path, e.g. "workshop/milling"
 
-    # Tags whose topic should use QoS 1 + retained=True
-    retained_folders: tuple[str, ...] = ("Identification",)
-    retained_tags: tuple[str, ...] = ("Simulation/SpeedFactor",)
+    # Tags whose topic should use QoS 1 + retained=True.
+    # FULLY RETAINED: every slowly-moving counter / flag / KPI so that any
+    # MQTT subscriber (3D Twin, Grafana, alarms, ...) receives the latest
+    # value immediately on subscribe, even if it joined after the publish.
+    # Telemetry (Hydraulic, Motor, Thermal, Process, Drive, Part,
+    # Identification, Digital, Oil, Pneumatic, Metrics, ...) is also retained
+    # here to match Node-RED Tab 01 UNS Gateway behaviour.
+    retained_folders: tuple[str, ...] = (
+        "Identification",
+        "Simulation",
+        "Tool",
+        "Status",
+        "Condition",
+        "KPIs",
+        "Process",
+        "Part",
+        "Hydraulic",
+        "Motor",
+        "Thermal",
+        "Drive",
+        "Digital",
+        "Oil",
+        "Pneumatic",
+        "Derating",
+        "Metrics",
+        "Derived",
+        "Analytics",
+    )
+    retained_tags: tuple[str, ...] = (
+        "Simulation/SpeedFactor",
+        "Simulation/PartIndex",
+        "Simulation/CycleIndex",
+        "Simulation/CycleSecond",
+        "Simulation/RowIndex",
+        "Simulation/SourceTimestamp",
+        "Tool/ToolWear_min",
+        "Condition/CoolerCondition_pct",
+        "Condition/ValveCondition_pct",
+        "Condition/PumpLeakage",
+        "Condition/AccumulatorPressure_bar",
+        "Condition/StableFlag",
+        "KPIs/CoolingEfficiency_pct",
+        "KPIs/CoolingPower_kW",
+        "KPIs/EfficiencyFactor_pct",
+    )
 
     def topic(self, folder: str, name: str) -> str:
         """Build the full MQTT topic for a given OPC UA browse path."""

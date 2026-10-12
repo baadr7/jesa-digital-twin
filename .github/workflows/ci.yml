@@ -141,13 +141,18 @@ jobs:
           client.loop_stop()
           client.disconnect()
 
-          # Verify ISA-95 topic structure: prefix/area/asset/folder/tag
-          pattern = re.compile(
-              r"^jesa/site1/[\w/]+/[\w]+/[\w]+/[\w_]+/[\w_]+$"
+          # Verify topic structure:
+          #   Assets: jesa/site1/{area}/{sub}/{asset_id}/{folder}/{tag}  (7 levels)
+          #   PLC:    jesa/site1/plc/{folder}/{tag}                     (5 levels)
+          asset_pattern = re.compile(
+              r"^jesa/site1/[\w]+/[\w]+/[\w]+/[\w_]+/[\w_]+$"
+          )
+          plc_pattern = re.compile(
+              r"^jesa/site1/plc/[\w_]+/[\w_]+$"
           )
           for topic in received:
-              if not pattern.match(topic):
-                  raise ValueError(f"Topic violates ISA-95 structure: {topic}")
+              if not (asset_pattern.match(topic) or plc_pattern.match(topic)):
+                  raise ValueError(f"Topic violates UNS structure: {topic}")
 
           print(f"UNS schema validation PASSED — {len(received)} topics verified")
           EOF

@@ -118,14 +118,16 @@ class TestRetainPolicy:
     def test_speed_factor_retained(self):
         assert A1.is_retained("Simulation", "SpeedFactor") is True
 
-    def test_process_tag_not_retained(self):
-        assert A1.is_retained("Process", "AirTemperature_K") is False
+    def test_process_tag_retained(self):
+        """Process folder is now fully retained (all folders are)."""
+        assert A1.is_retained("Process", "AirTemperature_K") is True
 
     def test_identification_qos1(self):
         assert A1.qos("Identification", "AssetId") == 1
 
-    def test_process_qos0(self):
-        assert A1.qos("Process", "AirTemperature_K") == 0
+    def test_process_qos1(self):
+        """All retained folders use QoS 1."""
+        assert A1.qos("Process", "AirTemperature_K") == 1
 
 
 # ── _json_safe ────────────────────────────────────────────────────────────

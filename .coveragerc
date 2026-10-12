@@ -1,0 +1,30 @@
+[run]
+# Measure coverage for business logic only.
+# Runtime modules (need live MQTT, OPC UA, PyTorch) are excluded.
+source =
+    sim
+    uns
+omit =
+    # Entry points (just argparse + asyncio.run)
+    sim/__main__.py
+    uns/__main__.py
+    # CLI tools (interactive scripts)
+    sim/tools/dashboard.py
+    sim/tools/prepare_a2.py
+    sim/tools/verify_client.py
+    # OPC UA → MQTT gateway runtime (needs OPC UA + MQTT broker)
+    uns/gateway.py
+    # ML inference service (needs PyTorch + trained models + MQTT)
+    uns/ml_inference_service.py
+    # Live verification script (connects to MQTT)
+    uns/verify.py
+    # OPC UA simulator base class (runs asyncua server)
+    sim/common/simulator.py
+
+[report]
+show_missing = true
+# Exclude lines that can't be tested
+exclude_lines =
+    pragma: no cover
+    if __name__
+    raise NotImplementedError

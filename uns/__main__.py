@@ -43,6 +43,11 @@ def main() -> None:
     parser.add_argument(
         "--verbose", "-v", action="store_true",
         help="Enable debug logging")
+    parser.add_argument(
+        "--derived", action="store_true",
+        help="Also run the Python derived-data engine (power_kw, delta_t_k, ...). "
+             "Default OFF — Node-RED Tab 02 handles derived KPIs in the standard "
+             "deployment. Enable only for a Python-only stack.")
     args = parser.parse_args()
 
     level = logging.DEBUG if args.verbose else logging.INFO
@@ -62,6 +67,7 @@ def main() -> None:
             poll_interval=args.poll,
             mqtt_host=args.broker,
             mqtt_port=args.port,
+            derived=args.derived,
         ))
     except KeyboardInterrupt:
         pass

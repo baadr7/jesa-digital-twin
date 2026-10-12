@@ -33,7 +33,7 @@ module.exports = {
 
     // ── Editor theme ───────────────────────────────────────────────────────
     editorTheme: {
-        page:    { title: 'JESA Digital Twin — UNS Gateway' },
+        page:    { title: 'JESA Digital Twin — Derived Data & Alarms' },
         header:  { title: 'JESA UNS' },
         projects: { enabled: false },
         codeEditor: { lib: 'monaco' },

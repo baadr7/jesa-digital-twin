@@ -221,8 +221,16 @@ async def run_gateway(
     poll_interval: float = config.POLL_INTERVAL_S,
     mqtt_host: str = config.MQTT_HOST,
     mqtt_port: int = config.MQTT_PORT,
+    derived: bool = False,
 ) -> None:
-    """Start the full gateway: MQTT publisher + one poller per OPC UA source."""
+    """Start the full gateway: MQTT publisher + one poller per OPC UA source.
+
+    Args:
+        derived: If True, also start the built-in Python derived-data engine
+            (power_kw, delta_t_k, cooler_delta_t_c, …). Default False because
+            Node-RED Tab 02 handles derived KPIs in the standard deployment.
+            Set True only for a Python-only stack (no Node-RED derived tab).
+    """
     if sources is None:
         sources = config.ALL_SOURCES
 
@@ -246,9 +254,13 @@ async def run_gateway(
         len(pollers), 1.0 / poll_interval, mqtt_host, mqtt_port,
     )
 
-    # Start derived-data engine on a background thread
-    derived = DerivedPublisher(mqtt_host, mqtt_port)
-    derived.start()
+    # Start derived-data engine (only if explicitly requested — Node-RED
+    # Tab 02 handles derived KPIs in the standard deployment to avoid dual
+    # publishers on derived topics).
+    derived_engine: DerivedPublisher | None = None
+    if derived:
+        derived_engine = DerivedPublisher(mqtt_host, mqtt_port)
+        derived_engine.start()
 
     # Status reporter
     async def status_reporter():
@@ -268,13 +280,16 @@ async def run_gateway(
     except asyncio.CancelledError:
         pass
     finally:
-        derived.stop()
+        if derived_engine is not None:
+            derived_engine.stop()
         publisher.stop()
         log.info("Gateway stopped. Total messages: %d", publisher.message_count)
 
 
 # ===========================================================================
-#  DERIVED DATA ENGINE — replicates Node-RED Tab 02 logic in pure Python
+#  DERIVED DATA ENGINE — optional pure-Python derived KPI publisher.
+#  Disabled by default (Node-RED Tab 02 handles derived KPIs).
+#  Enable with `python -m uns --derived` for a Python-only stack.
 #  Subscribes to raw UNS topics, computes derived values, republishes them.
 # ===========================================================================
 
@@ -286,7 +301,7 @@ import threading as _threading
 class DerivedPublisher:
     """Subscribes to raw telemetry topics and publishes derived KPIs.
 
-    Derived topics published (matches what Node-RED Tab 02 computed):
+    Derived topics published (same schema as Node-RED Tab 02):
 
     A1:
       .../A1/derived/power_kw             = torque * speed * 2π/60 / 1000

@@ -1335,6 +1335,11 @@ let _a2SimStarted = false;
 // A1 : previous state to detect transitions (avoid log spam)
 let _a1PrevState = '';   // '' | 'healthy' | 'warning' | 'critical'
 
+// Timing-indicator last-values — used as monotonic guards so a stale/default
+// sample of 0 can never overwrite a real counter (part_index, cycle_index,
+// tool_wear_min) that has already advanced past 0.
+const _timingLast = { a1Part: -1, a1ToolWear: -1, a2CycleIdx: -1, a2CycleSec: -1 };
+
 // A2 : worst-case state across all 4 conditions (cooler, valve, pump, accumulator)
 // Updated by each condition handler; drives chip + card glow + 3D glow
 const _a2State = { cooler: 'healthy', valve: 'healthy', pump: 'healthy', accum: 'healthy' };
@@ -2416,32 +2421,54 @@ function onMessageArrived(message) {
             }
         } catch (_) { /* ignore routing failures for analytics-only topics */ }
 
-        // ── Per-asset timing indicators — always update, independent of main chain ──
-        if (topic.includes('/A1/tool/tool_wear_min')) {
-            const el = document.getElementById('a1-tool-wear');
-            if (el) el.textContent = Number(v).toFixed(0) + ' min';
+        // ── Per-asset timing indicators — guard against null / stale / NaN ──
+        // Stale messages carry v=null (e.g. gateway disconnect) ; without this
+        // guard Number(null)===0 would briefly reset every gauge to 0 before
+        // the next good sample arrives (visible "flash to 0").
+        // Monotonic guards: counters (part_index, cycle_index) and tool_wear
+        // must never drop to 0 after having advanced — this blocks stale/default
+        // samples from a second publisher overwriting the real value.
+        const _timingOk = v !== null && v !== undefined && payload.q !== 'stale';
+        if (_timingOk && topic.includes('/A1/tool/tool_wear_min')) {
+            const num = Number(v);
+            if (!Number.isNaN(num) && (num >= _timingLast.a1ToolWear || num === 0)) {
+                _timingLast.a1ToolWear = num;
+                const el = document.getElementById('a1-tool-wear');
+                if (el) el.textContent = num.toFixed(0) + ' min';
+            }
         }
-        if (topic.includes('/A1/simulation/part_index')) {
-            const el = document.getElementById('a1-part-index');
-            if (el) el.textContent = '#' + Number(v).toLocaleString('en-US');
+        if (_timingOk && topic.includes('/A1/simulation/part_index')) {
+            const num = Number(v);
+            if (!Number.isNaN(num) && num >= _timingLast.a1Part) {
+                _timingLast.a1Part = num;
+                const el = document.getElementById('a1-part-index');
+                if (el) el.textContent = '#' + num.toLocaleString('en-US');
+            }
         }
-        if (topic.includes('/A2/simulation/cycle_index')) {
-            const el = document.getElementById('a2-cycle-index');
-            if (el) el.textContent = Number(v) + ' / 2205';
-            // Also mark started if cycle has advanced past 0
-            if (Number(v) > 0) _a2SimStarted = true;
+        if (_timingOk && topic.includes('/A2/simulation/cycle_index')) {
+            const num = Number(v);
+            if (!Number.isNaN(num) && num >= _timingLast.a2CycleIdx) {
+                _timingLast.a2CycleIdx = num;
+                const el = document.getElementById('a2-cycle-index');
+                if (el) el.textContent = num + ' / 2205';
+                // Also mark started if cycle has advanced past 0
+                if (num > 0) _a2SimStarted = true;
+            }
         }
-        if (topic.includes('/A2/simulation/cycle_second')) {
+        if (_timingOk && topic.includes('/A2/simulation/cycle_second')) {
             const sec = Number(v);
-            const el = document.getElementById('a2-cycle-second');
-            if (el) el.textContent = sec + ' / 59 s';
-            // Drive the cycle progress bar (0–59 → 0–100%)
-            const bar = document.getElementById('a2-cycle-bar');
-            if (bar) bar.style.width = Math.round((sec / 59) * 100) + '%';
-            // Mark sim as started once second has advanced past 0
-            if (sec > 0 || _a2SimStarted) _a2SimStarted = true;
+            if (!Number.isNaN(sec)) {
+                _timingLast.a2CycleSec = sec;
+                const el = document.getElementById('a2-cycle-second');
+                if (el) el.textContent = sec + ' / 59 s';
+                // Drive the cycle progress bar (0–59 → 0–100%)
+                const bar = document.getElementById('a2-cycle-bar');
+                if (bar) bar.style.width = Math.round((sec / 59) * 100) + '%';
+                // Mark sim as started once second has advanced past 0
+                if (sec > 0 || _a2SimStarted) _a2SimStarted = true;
+            }
         }
-        if (topic.includes('/A3/simulation/source_timestamp') && v) {
+        if (_timingOk && topic.includes('/A3/simulation/source_timestamp') && v) {
             const el = document.getElementById('a3-dataset-ts');
             if (el) el.textContent = String(v).replace('T', ' ').slice(0, 19);
         }
@@ -2453,17 +2480,36 @@ function onMessageArrived(message) {
         if (topic.includes('/A1/analytics/machine_failure') || topic.includes('/A1/status/machine_failure')) {
             if (v === null || v === undefined || payload.q === 'stale') return;
 
-            const failureProbability = payload.probability ?? ((v === 1 || v === true) ? 1 : 0);
+            // Only the ML analytics topic carries a real probability.
+            // The raw OPC UA status boolean (false) must NOT reset the
+            // probability display to 0 — keep the last known ML probability.
+            const fromAnalytics = payload.probability !== undefined;
+            const failureProbability = fromAnalytics
+                ? Number(payload.probability)
+                : ((v === 1 || v === true) ? 1 : 0);
             const probVal = Number(failureProbability) * 100;
             const prob    = probVal.toFixed(1);
-            document.getElementById('a1-prob').textContent = prob + '%';
-            document.getElementById('a1-bar').style.width  = probVal.toFixed(1) + '%';
+
+            if (fromAnalytics) {
+                document.getElementById('a1-prob').textContent = prob + '%';
+                document.getElementById('a1-bar').style.width  = probVal.toFixed(1) + '%';
+            }
 
             // Three-level state: critical (>20% or binary failure) / warning (5–20%) / healthy
+            // The visual state is driven by the ML analytics probability. A raw status
+            // message (v=0, no failure) must NOT flicker the UI back to HEALTHY between
+            // two analytics samples — only an actual failure (v=1) overrides the state.
             const isFailure  = (v === 1 || v === true);
-            const newState   = (isFailure || probVal > 20) ? 'critical'
-                             : probVal > 5                 ? 'warning'
-                             :                               'healthy';
+            let newState;
+            if (fromAnalytics) {
+                newState = (isFailure || probVal > 20) ? 'critical'
+                         : probVal > 5                 ? 'warning'
+                         :                               'healthy';
+            } else if (isFailure) {
+                newState = 'critical';   // ground-truth failure overrides analytics
+            } else {
+                newState = _a1PrevState; // keep last analytics-driven state, no flicker
+            }
             const stateChanged = newState !== _a1PrevState;
             _a1PrevState = newState;
 
@@ -2498,8 +2544,10 @@ function onMessageArrived(message) {
                 if (stateChanged)
                     _logEvent(`A1 — Healthy (prob: ${prob}%)`, 'info');
             }
-            _vizPush(vizData.A1.failureProb, probVal);
-            _vizPush(vizData.A1.timestamps,  _vizTimestamp());
+            if (fromAnalytics) {
+                _vizPush(vizData.A1.failureProb, probVal);
+                _vizPush(vizData.A1.timestamps,  _vizTimestamp());
+            }
         }
 
         // ── A2 Hydraulics ──
@@ -2523,9 +2571,20 @@ function onMessageArrived(message) {
                   3: { pct:  20, txt: 'Near-Failure', cls: 'critical' },
                   0: { pct:   0, txt: 'Failed',       cls: 'critical' },
             };
-            const cm = coolerMap[v] ?? { pct: 0, txt: `Class ${v}`, cls: 'warning' };
+            const fromAnalytics = topic.includes('/A2/analytics/');
+            // Analytics publishes discrete ZeMA classes (100/20/3/0).
+            // Raw condition publishes a continuous percentage — use it directly
+            // for the bar and derive the label from thresholds, avoiding the
+            // "flash to 0" caused by a percentage not found in coolerMap.
+            const cm = fromAnalytics
+                ? (coolerMap[v] ?? { pct: 0, txt: `Class ${v}`, cls: 'warning' })
+                : {
+                    pct: Math.min(Number(v), 100),
+                    txt: v >= 90 ? 'Optimal' : v >= 50 ? 'Partial' : v >= 15 ? 'Near-Failure' : 'Failed',
+                    cls: v >= 90 ? 'healthy' : v >= 50 ? 'warning' : 'critical',
+                  };
 
-            document.getElementById('a2-cooler').textContent = cm.txt + ' (class ' + v + ')';
+            document.getElementById('a2-cooler').textContent = cm.txt + (fromAnalytics ? ' (class ' + v + ')' : '');
             document.getElementById('a2-cooler').className   = 'gauge-value ' + cm.cls;
             document.getElementById('a2-bar').style.width    = cm.pct + '%';
 

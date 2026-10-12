@@ -1,8 +1,13 @@
-# Node-RED UNS Migration — Architecture & Operating Guide
+# Node-RED — Derived Data, Alarms & Monitor
 
-**Replaces:** `uns/gateway.py` (OPC UA → MQTT bridge)  
-**Adds:** Derived Data computation · ISA-18.2 Alarm Engine (HH/H/L/LL)  
-**Does NOT replace:** `uns/ml_inference_service.py` (ML stays Python)
+**Role:** Node-RED computes **derived KPIs**, runs the **ISA-18.2 alarm engine**,
+and hosts the **system monitor dashboard**.  
+**OPC UA → MQTT bridge:** handled by **Python `uns/gateway.py`** (sole publisher).  
+**Does NOT replace:** `uns/gateway.py` (raw telemetry) · `uns/ml_inference_service.py` (ML).
+
+> The OPC UA Gateway tab (`tab-gw`) is **disabled** in `infra/nodered/flows.json`.
+> Raw telemetry flows exclusively through the Python gateway to avoid dual-publisher
+> "flash-to-0" artifacts on the 3D dashboard.
 
 ---
 
@@ -16,9 +21,13 @@
 │  │ sim A1 :4841 │  │ sim A2 :4842 │  │ sim A3 :4843 │  │ PLC :4840 │  │
 │  │ OPC UA server│  │ OPC UA server│  │ OPC UA server│  │ OPC UA    │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └─────┬─────┘  │
-│         │                 │                 │                 │        │
 │         └─────────────────┴─────────────────┴────────────────┘        │
-│                                     │ OPC UA TCP (host.docker.internal) │
+│                                     │ OPC UA TCP (localhost)            │
+│                              ┌──────▼───────┐                           │
+│                              │ Python UNS   │  ← host process           │
+│                              │ gateway.py   │   (1 Hz poll)             │
+│                              └──────┬───────┘                           │
+│                                     │ MQTT publish (raw telemetry)      │
 └─────────────────────────────────────┼───────────────────────────────────┘
                                       │
 ┌─────────────────────────────────────┼───────────────────────────────────┐
@@ -27,10 +36,7 @@
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │  NODE-RED  :1880                                                 │   │
 │  │                                                                  │   │
-│  │  Tab 01 · OPC UA Gateway                                        │   │
-│  │    1 Hz inject → tag definitions → OpcUa-Client read             │   │
-│  │    → normalise → _toSnake() / topic builder → mqtt-out          │   │
-│  │    → stale watchdog on disconnect                               │   │
+│  │  Tab 01 · OPC UA Gateway  →  DISABLED (Python gateway only)      │   │
 │  │                                                                  │   │
 │  │  Tab 02 · Derived Data  (subscribe MQTT → compute → publish)   │   │
 │  │    A1: power_kw · delta_t_k · wear_torque · overstrain_flag     │   │
@@ -92,7 +98,7 @@ docker exec jesa-nodered cat /data/flows.json > infra/nodered/flows.json
 
 ## 3. MQTT Topic Schema
 
-### 3.1 Raw telemetry (replaces uns/gateway.py output — identical schema)
+### 3.1 Raw telemetry (published by Python `uns/gateway.py`)
 
 ```
 jesa/site1/{area}/{AssetId}/{folder}/{tag}
@@ -105,7 +111,7 @@ jesa/site1/{area}/{AssetId}/{folder}/{tag}
 | A3    | fleet/apu               | `jesa/site1/fleet/apu/A3/pneumatic/tp3_bar`            |
 | PLC   | plc                     | `jesa/site1/plc/system/mode`                           |
 
-Payload format (unchanged from Python gateway):
+Payload format (Python gateway):
 ```json
 { "ts": "2026-08-04T12:00:00Z", "v": 42.7, "q": "good" }
 ```
@@ -241,41 +247,48 @@ the `nodered-data` volume.
 
 ---
 
-## 6. Coexistence Mode (parallel run for validation)
+## 6. Dual-Publisher Warning (do NOT run both gateways)
 
-During cutover you can run **both** the Python gateway and Node-RED
-simultaneously. They will publish identical topics; Mosquitto deduplicates
-by last-writer-wins (no retained conflict for QoS 0 topics).
+Running **both** the Python gateway and the Node-RED OPC UA Gateway tab
+simultaneously causes two publishers to write the same MQTT topics. This
+produces "flash-to-0" artifacts on the 3D dashboard because stale/default
+samples (e.g. `v: null` or the OPC UA initial value `0`) briefly overwrite
+the real value before the next good sample arrives.
 
-To run Python gateway alongside Node-RED:
-```powershell
-.venv\Scripts\python.exe -m uns   # in a separate terminal
-```
+**Current configuration:**
+- Python `uns/gateway.py` = **sole** OPC UA → MQTT publisher
+- Node-RED `tab-gw` = **disabled** (only derived/alarms/monitor run)
 
-Verify they produce the same topic values:
-```bash
-docker exec jesa-mosquitto mosquitto_sub -t "jesa/site1/#" -v | head -40
-```
+To temporarily re-enable the Node-RED OPC UA tab for testing:
+1. Stop the Python gateway
+2. Edit `infra/nodered/flows.json`, set `tab-gw.disabled = false`
+3. `docker compose restart nodered`
 
-Once validated, stop the Python gateway. Node-RED is the sole publisher.
-
----
-
-## 7. Rollback
-
-To revert entirely to the Python gateway:
-1. `docker compose stop nodered`
-2. In `launch_all.ps1`, uncomment the `python -m uns` step (or run manually)
-3. No other changes needed — topic schema is identical
+Revert before going back to normal operation.
 
 ---
 
-## 8. What Is NOT Migrated
+## 7. Reverting to Node-RED as OPC UA gateway
 
-| Component                   | Stays Python | Reason                                            |
-|-----------------------------|--------------|---------------------------------------------------|
-| `uns/ml_inference_service.py` | ✅          | PyTorch LSTM + sklearn — no ML runtime in Node-RED|
-| `sim/` OPC UA simulators    | ✅           | asyncua servers; not part of gateway              |
-| Python `uns/config.py`      | kept as ref  | Node-RED settings.js is the new source of truth   |
-| Python `uns/gateway.py`     | ❌ retired   | Replaced by Node-RED Tab 01                       |
-| Python `sim/plc.py` alarms  | ❌ optional  | Node-RED Tab 03 covers all PLC alarm logic        |
+If you ever need Node-RED to handle OPC UA → MQTT instead of Python:
+1. Stop the Python gateway (`uns/gateway.py`)
+2. In `infra/nodered/flows.json`, set `tab-gw.disabled = false`
+3. `docker compose restart nodered`
+4. No other changes needed — topic schema is identical
+
+To switch back to Python: reverse the above (disable `tab-gw`, restart Node-RED,
+start `python -m uns`).
+
+---
+
+## 8. Component Ownership
+
+| Component                   | Owner    | Notes                                                      |
+|-----------------------------|----------|------------------------------------------------------------|
+| `uns/gateway.py`            | Python   | Sole OPC UA → MQTT bridge (raw telemetry)                  |
+| `uns/ml_inference_service.py` | Python | ML models; no Node-RED ML runtime                          |
+| `sim/` OPC UA simulators    | Python   | asyncua servers; not part of gateway                       |
+| Node-RED `tab-der`          | Node-RED | Derived KPIs (power_kw, delta_t, wear_torque, …)           |
+| Node-RED `tab-alm`          | Node-RED | ISA-18.2 alarm engine (HH/H/L/LL)                          |
+| Node-RED `tab-mon`          | Node-RED | System monitor dashboard                                   |
+| Node-RED `tab-gw`           | DISABLED | Kept for reference; Python gateway is active               |

@@ -156,7 +156,7 @@ A1 = milling machine, A2 = hydraulic test rig, A3 = APU air compressor. Datasets
 |---|---|---|
 | Asset simulators | Python + `asyncua` + pandas | easy dataset replay, real OPC UA servers |
 | PLC | CODESYS (or OpenPLC) | free, industrial-grade, native OPC UA |
-| Gateway | Node-RED or Telegraf | quick OPC UA→MQTT mapping, visual flows |
+| Gateway | Python `uns/gateway.py` | sole OPC UA→MQTT bridge; Node-RED handles derived KPIs + alarms |
 | Broker / UNS | EMQX or Mosquitto | Sparkplug-friendly, WebSocket for 3D/web |
 | Storage | InfluxDB + Telegraf | time-series native, Grafana integration |
 | Visualization | Grafana | dashboards, alerting |

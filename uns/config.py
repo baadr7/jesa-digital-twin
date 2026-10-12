@@ -61,7 +61,7 @@ class AssetMapping:
     # value immediately on subscribe, even if it joined after the publish.
     # Telemetry (Hydraulic, Motor, Thermal, Process, Drive, Part,
     # Identification, Digital, Oil, Pneumatic, Metrics, ...) is also retained
-    # here to match Node-RED Tab 01 UNS Gateway behaviour.
+    # here to match the original UNS Gateway behaviour.
     retained_folders: tuple[str, ...] = (
         "Identification",
         "Simulation",

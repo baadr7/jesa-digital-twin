@@ -1,12 +1,23 @@
-# JESA Digital Twin — Full Infrastructure Stack
+# JESA Digital Twin — Infrastructure Stack
 #
-# All services in one docker-compose.
-# OPC UA simulators (A1/A2/A3/PLC) run on the HOST via launch_all.ps1
-# and are reached by Node-RED via host.docker.internal:4840-4843.
+# Services in this file:
+#   - mosquitto   : MQTT broker (UNS backbone)
+#   - nodered     : Derived data + ISA-18.2 Alarm Engine + Monitor
+#                   (OPC UA Gateway tab is DISABLED — Python uns/gateway.py
+#                    is the sole OPC UA -> MQTT bridge, launched locally)
+#   - influxdb    : Time-series database
+#   - telegraf    : MQTT -> InfluxDB writer
+#   - grafana     : Dashboards
+#   - ml-inference: OPTIONAL — ML inference container.
+#                   By default the launcher runs ML inference locally
+#                   (uns/ml_inference_service.py) for model hot-reload.
+#                   Only start this container if you want Docker-hosted ML.
+#
+# OPC UA simulators (A1/A2/A3/PLC), the UNS gateway (Python), and the ML
+# inference service run on the HOST via launch_all.{bat,ps1}.
 #
 # Usage:
-#   docker compose build nodered        # rebuild Node-RED image
-#   docker compose up -d                # start everything
+#   docker compose up -d mosquitto nodered influxdb telegraf grafana
 #   docker compose logs -f nodered      # follow Node-RED logs
 #   docker compose down                 # stop all containers
 
@@ -31,9 +42,10 @@ services:
       retries: 3
       start_period: 5s
 
-  # ── Node-RED UNS Gateway ─────────────────────────────────────────────────
-  # Tabs: OPC UA Gateway · Derived Data · Alarm Engine · Monitor Dashboard
-  # Connects to OPC UA sims on host via host.docker.internal:4840–4843.
+  # ── Node-RED (Derived Data + Alarms + Monitor) ───────────────────────────
+  # Tabs active: Derived Data · Alarm Engine · Monitor Dashboard
+  # OPC UA Gateway tab (tab-gw) is DISABLED in infra/nodered/flows.json.
+  # Python uns/gateway.py (host process) is the sole OPC UA -> MQTT bridge.
   # NOTE: --jitless disables V8 JIT to work around WSL2 kernel TurboFan crash.
   nodered:
     build:
@@ -109,8 +121,10 @@ services:
     volumes:
       - ./infra/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
 
-  # ── ML Inference Service ─────────────────────────────────────────────────
-  # Subscribes to MQTT topics published by Node-RED.
+  # ── ML Inference Service (OPTIONAL — runs locally by default) ─────────────
+  # Subscribes to MQTT topics published by Python uns/gateway.py.
+  # The launcher starts this service LOCALLY (uns/ml_inference_service.py)
+  # for model hot-reload. Start this container only if you want Docker-hosted ML.
   # Code is COPY'd into the image (not volume-mounted) to avoid WSL2 .pyc corruption.
   ml-inference:
     build:

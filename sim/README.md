@@ -124,5 +124,5 @@ UNS -> InfluxDB -> Grafana (ROADMAP.md Phase 5).
 
 1. Soft PLC (CODESYS or OpenPLC) consuming the three endpoints as OPC UA
    client, adding interlock logic, re-exposing consolidated tags.
-2. OPC UA -> MQTT gateway (Node-RED or Telegraf) publishing into the UNS
+2. OPC UA -> MQTT gateway (Python `uns/gateway.py`) publishing into the UNS
    topic hierarchy.

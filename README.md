@@ -1,4 +1,4 @@
-﻿# JESA Digital Twin
+# JESA Digital Twin
 
 ## Overview
 JESA Digital Twin is an Industry 4.0 predictive maintenance platform that simulates industrial assets, collects telemetry via OPC UA, runs ML models for anomaly/failure prediction, and provides a 3D interactive visualization of the factory floor!
@@ -53,9 +53,14 @@ python setup_datasets.py
 
 #### Step 1: Start Docker Services
 ```bash
-docker compose up -d
+docker compose up -d mosquitto nodered influxdb telegraf grafana
 ```
-Wait until all containers are healthy (Mosquitto, InfluxDB, Grafana).
+Wait until all containers are healthy (Mosquitto, Node-RED, InfluxDB, Grafana).
+
+> **Gateway strategy:** `uns/gateway.py` (Python) is the **sole OPC UA → MQTT bridge**.
+> Node-RED (Docker) handles **derived data**, the **ISA-18.2 alarm engine**, and the
+> **monitor dashboard** only — its OPC UA Gateway tab is disabled in `infra/nodered/flows.json`.
+> The ML inference service runs **locally** (`uns/ml_inference_service.py`) for model hot-reload.
 
 #### Step 2: Run Simulators & PLC
 ```bash

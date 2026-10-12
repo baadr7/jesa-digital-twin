@@ -24,8 +24,11 @@ Reference: docs/uns-spec.md
 from __future__ import annotations
 
 import asyncio
+import collections as _collections
 import json
 import logging
+import math as _math
+import threading as _threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -293,9 +296,6 @@ async def run_gateway(
 #  Subscribes to raw UNS topics, computes derived values, republishes them.
 # ===========================================================================
 
-import collections as _collections
-import math as _math
-import threading as _threading
 
 
 class DerivedPublisher:
